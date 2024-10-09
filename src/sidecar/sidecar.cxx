@@ -23,13 +23,13 @@ static HMODULE LocatePERoot() {
 	return DetourGetContainingModule(DetourGetEntryPoint(NULL));
 }
 
-sf4eSidecar::Payload* FindPayload() {
+sf4e::Payload* FindPayload() {
 	HMODULE hMod;
-	sf4eSidecar::Payload* payload;
+	sf4e::Payload* payload;
 	DWORD payloadLength;
 
 	for (hMod = DetourEnumerateModules(NULL); hMod != NULL; hMod = DetourEnumerateModules(hMod)) {
-		payload = (sf4eSidecar::Payload*)DetourFindPayload(hMod, sf4eSidecar::s_guidSidecarPayload, &payloadLength);
+		payload = (sf4e::Payload*)DetourFindPayload(hMod, sf4eSidecar::s_guidSidecarPayload, &payloadLength);
 		if (GetLastError() == 0 && payload != NULL) {
 			return payload;
 		}
@@ -46,8 +46,7 @@ __declspec(dllexport) BOOL WINAPI DllMain(
 	LPVOID reserved
 ) {
 	LONG error;
-	sf4eSidecar::Payload* payload = NULL;
-
+	sf4e::Payload* payload = NULL;
 
 	switch (dwReason)
 	{
@@ -56,7 +55,7 @@ __declspec(dllexport) BOOL WINAPI DllMain(
 		payload = FindPayload();
 		Dimps::Locate(LocatePERoot());
 		DetourTransactionBegin();
-		sf4e::Install(hinstDLL, payload != NULL ? payload->hSyncEvent : NULL);
+		sf4e::Install(hinstDLL, payload);
 		payload = NULL;
 		error = DetourTransactionCommit();
 		if (error != NO_ERROR) {

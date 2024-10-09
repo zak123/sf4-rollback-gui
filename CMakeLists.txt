@@ -13,12 +13,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 add_compile_definitions(WIN32_LEAN_AND_MEAN)
 
 find_library(LIB_DETOURS "detours")
+find_package(CLI11 CONFIG REQUIRED)
 find_package(GameNetworkingSockets CONFIG REQUIRED)
 find_package(ggpo CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(protobuf CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+
 find_path(VALVEFILEVDF_INCLUDE_DIRS "vdf_parser.hpp")
 
 add_library(Dimps STATIC
@@ -118,7 +120,7 @@ target_link_libraries(SessionInteractiveTest PRIVATE nlohmann_json::nlohmann_jso
 
 add_executable(Launcher WIN32 src/launcher/launcher.cxx)
 target_include_directories(Launcher PRIVATE ${VALVEFILEVDF_INCLUDE_DIRS})
-target_link_libraries(Launcher PRIVATE ${LIB_DETOURS} spdlog::spdlog "shlwapi" "pathcch")
+target_link_libraries(Launcher PRIVATE ${LIB_DETOURS} CLI11::CLI11 spdlog::spdlog "shlwapi" "pathcch")
 
 add_library(Overlay STATIC src/overlay/overlay.cxx src/overlay/overlay.h)
 target_link_libraries(Overlay PRIVATE "Xinput9_1_0" imgui::imgui ggpo::GGPO spdlog::spdlog Dimps sf4e Session)

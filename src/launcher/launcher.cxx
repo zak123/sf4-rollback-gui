@@ -9,10 +9,12 @@
 #include <strsafe.h>
 #include <winuser.h>
 
+#include <CLI/CLI.hpp>
 #include <detours/detours.h>
 #include <spdlog/spdlog.h>
 #include <vdf_parser.hpp>
 
+#include "../sf4e/sf4e.hxx"
 #include "../sidecar/sidecar.hxx"
 
 LPCWCH szGameFilename = L"SSFIV.exe";
@@ -174,6 +176,7 @@ void CreateAppIDFile(LPWSTR szGuiltyDirectory) {
 }
 
 void CreateSF4Process(
+	const sf4e::Args& args,
 	LPWSTR szGameDirectory,
 	LPWSTR szExePath,
 	int nDlls,
@@ -223,13 +226,14 @@ void CreateSF4Process(
 		ExitProcess(9009);
 	}
 
-	sf4eSidecar::Payload p = { 0 };
+	sf4e::Payload p;
+	p.args = args;
 	if (hSyncEvent != NULL) {
 		if (!DuplicateHandle(GetCurrentProcess(), hSyncEvent, pi.hProcess, &p.hSyncEvent, 0, false, DUPLICATE_SAME_ACCESS)) {
 			spdlog::warn("CreateSF4Process: DuplicateHandle() could not duplicate game sync handle, game may be unable to access Steam: err {}", GetLastError());
 		}
 	}
-	if (!DetourCopyPayloadToProcess(pi.hProcess, sf4eSidecar::s_guidSidecarPayload, &p, sizeof(sf4eSidecar::Payload))) {
+	if (!DetourCopyPayloadToProcess(pi.hProcess, sf4eSidecar::s_guidSidecarPayload, &p, sizeof(sf4e::Payload))) {
 		StringCchPrintf(szErrorString, 1024, L"DetourCopyPayloadToProcess failed: %d", GetLastError());
 		MessageBox(NULL, szErrorString, NULL, MB_OK);
 		ExitProcess(9008);
@@ -263,6 +267,26 @@ int WINAPI wWinMain(
 		szSidecarDllPathA,
 	};
 
+	sf4e::Args args;
+	CLI::App app("A process-inspection and modification tool for the Steam release of Ultra Street Fighter 4.", "sf4e");
+	app.add_flag("--console", args.bShowConsole, "Show a console with live logging. The console may interfere with inputs to the main window.");
+	int argc;
+	LPWSTR* argv = CommandLineToArgvW(
+		// Intentionally do _not_ use lpCmdLine here. Windows removes
+		// the path or name of the program from the start of lpCmdLine,
+		// so if it were parsed with `CommandLineToArgvW`, argv[0]
+		// would be the first argument. This isn't standards-compatible-
+		// in pretty much every other context, argv[0] is a path to or
+		// name of the program invoked, and CLI11 assumes that standard.
+		// Once passed to CLI11, parsing the nonstandard argv array
+		// would effectively ignore the first CLI option.
+		//
+		// Instead, use the raw command line.
+		GetCommandLineW(),
+		&argc
+	);
+	CLI11_PARSE(app, argc, argv);
+
 	// Compute the path to the sidecar DLL based on the launcher's directory.
 	// Ideally, this wouldn't have to convert from wide-char to multibyte in
 	// the system's codepage, but Detours uses multibyte paths when injecting
@@ -279,13 +303,13 @@ int WINAPI wWinMain(
 	wchar_t szPathW[2048] = { 0 };
 	wchar_t szNewPathW[2048] = { 0 };
 	GetEnvironmentVariableW(L"PATH", szPathW, 2048);
-	if (res = StringCchPrintf(
+	if ((res = StringCchPrintf(
 		szNewPathW,
 		2048,
 		TEXT("%s;%s"),
 		szPathW,
 		szLauncherDirW
-	)) {
+	)) != S_OK) {
 		StringCchPrintfW(
 			szErrorStringW,
 			4096,
@@ -303,6 +327,6 @@ int WINAPI wWinMain(
 		MessageBoxW(NULL, L"Cannot find Street Fighter 4: check logs for debugging", NULL, MB_OK);
 	}
 	CreateAppIDFile(szGameDirectory);
-	CreateSF4Process(szGameDirectory, szExePath, nDlls, dlls);
+	CreateSF4Process(args, szGameDirectory, szExePath, nDlls, dlls);
 	return 0;
 }

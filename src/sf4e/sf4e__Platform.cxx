@@ -110,17 +110,20 @@ void fMain::Install() {
 }
 
 int fMain::Initialize(void* a, void* b, void* c) {
-    if (sf4e::hSyncHandle != NULL) {
-        SetEvent(sf4e::hSyncHandle);
-        CloseHandle(sf4e::hSyncHandle);
-        sf4e::hSyncHandle = NULL;
+    if (sf4e::hSyncEvent != NULL) {
+        SetEvent(sf4e::hSyncEvent);
+        CloseHandle(sf4e::hSyncEvent);
+        sf4e::hSyncEvent = NULL;
     }
 
     int rval = (this->*(rMain::publicMethods.Initialize))(a, b, c);
 
-    BOOL hasConsole = AllocConsole();
-    if (!hasConsole) {
-        MessageBox(NULL, TEXT("Could not allocate console!"), NULL, MB_OK);
+    BOOL hasConsole = false;
+    if (sf4e::args.bShowConsole) {
+        hasConsole = AllocConsole();
+        if (!hasConsole) {
+            MessageBox(NULL, TEXT("Could not allocate console!"), NULL, MB_OK);
+        }
     }
 
     // Set up spdlog

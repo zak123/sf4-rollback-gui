@@ -7,11 +7,21 @@
 #include "../Dimps/Dimps__Eva.hxx"
 
 namespace sf4e {
+	typedef struct Args {
+		bool bShowConsole = false;
+	} Args;
+
+	typedef struct Payload {
+		Args args;
+		HANDLE hSyncEvent = NULL;
+	} Payload;
+
 	extern std::string sidecarHash;
 	extern std::mt19937 localRand;
-	extern HANDLE hSyncHandle;
+	extern Args args;
+	extern HANDLE hSyncEvent;
 
-	void Install(HINSTANCE hinstDll, HANDLE hSyncHandle);
+	void Install(HINSTANCE hinstDll, const Payload* const payload);
 
 	namespace Eva {
 		struct IEmSpriteAction : Dimps::Eva::IEmSpriteAction {

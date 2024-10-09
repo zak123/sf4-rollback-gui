@@ -3,6 +3,10 @@
   "version-string": "0.0.1",
   "dependencies": [
     {
+      "name": "cli11",
+      "version>=": "2.4.2"
+    },
+    {
       "name": "detours",
       "version>=": "4.0.1#7"
     },
