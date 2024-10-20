@@ -12,8 +12,10 @@ namespace sf4e {
 		struct MainMenu : Dimps::GameEvents::MainMenu
 		{
 			void* Destroy(DWORD arg1);
+			void OnModeSelected(int mode);
 			int GetItemObserverState();
 
+			static int (*OnModeSelectedOverride)(int mode);
 			static Dimps::GameEvents::MainMenu* instance;
 			static Dimps::GameEvents::MainMenu* Factory(DWORD arg1, DWORD arg2, DWORD arg3);
 			static int bOverrideItemObserverState;

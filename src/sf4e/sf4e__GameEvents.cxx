@@ -31,6 +31,7 @@ using fVsMode = fGameEvents::VsMode;
 using fVsPreBattle = fGameEvents::VsPreBattle;
 using fVsStageSelect = fGameEvents::VsStageSelect;
 
+int (*fMainMenu::OnModeSelectedOverride)(int mode);
 rMainMenu* fMainMenu::instance = nullptr;
 int fMainMenu::bOverrideItemObserverState = -1;
 rVsMode* fVsMode::instance = nullptr;
@@ -131,8 +132,10 @@ void fGameEvents::Install() {
 void fMainMenu::Install() {
 	void* (fMainMenu:: * _fDestroy)(DWORD) = &Destroy;
 	int (fMainMenu:: * _fGetItemObserverState)() = &GetItemObserverState;
+	void (fMainMenu:: * _fOnModeSelected)(int) = &OnModeSelected;
 	DetourAttach((PVOID*)&rMainMenu::publicMethods.Destroy, *(PVOID*)&_fDestroy);
 	DetourAttach((PVOID*)&rMainMenu::itemObserverMethods.GetItemObserverState, *(PVOID*)&_fGetItemObserverState);
+	DetourAttach((PVOID*)&rMainMenu::itemObserverMethods.OnModeSelected, *(PVOID*)&_fOnModeSelected);
 	DetourAttach((PVOID*)&rMainMenu::staticMethods.Factory, &Factory);
 }
 
@@ -160,6 +163,14 @@ void* fMainMenu::Destroy(DWORD arg1) {
 	}
 
 	return (_this->*rMainMenu::publicMethods.Destroy)(arg1);
+}
+
+void fMainMenu::OnModeSelected(int mode) {
+	if (OnModeSelectedOverride(mode)) {
+		return;
+	}
+
+	return (this->*rMainMenu::itemObserverMethods.OnModeSelected)(mode);
 }
 
 void fRootEvent::Install() {

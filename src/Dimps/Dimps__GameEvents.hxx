@@ -52,11 +52,28 @@ namespace Dimps {
 				MMIOS_IDLE = 2
 			};
 
+			enum MainMenuItemID {
+				MMI_ARCADE = 0,
+				MMI_VERSUS = 1,
+				MMI_NETWORK = 2,
+				MMI_CHALLENGE = 3,
+				MMI_TRAINING = 4,
+				MMI_PLAYERDATA = 5,
+				MMI_OPTIONS = 6,
+				MMI_STORE = 7,
+				MMI_BENCHMARK = 8,
+				MMI_QUIT = 10,
+				MMI_ROOT = 11,
+				MMI_TOTITLE = 12,
+				MMI_MANUAL = 13,
+			};
+
 			typedef struct __publicMethods {
 				void* (MainMenu::* Destroy)(DWORD arg1);
 			} __publicMethods;
 
 			typedef struct __itemObserverMethods {
+				void (MainMenu::* OnModeSelected)(int mode);
 				void* (MainMenu::* GoToVersusMode)();
 				int (MainMenu::* GetItemObserverState)();
 			} __itemObserverMethods;

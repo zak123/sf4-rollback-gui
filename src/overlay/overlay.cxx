@@ -1057,6 +1057,8 @@ void DrawNetworkWindow(bool* pOpen) {
 		pOpen,
 		ImGuiWindowFlags_None
 	);
+	Text("Steam multiplayer is disabled while sf4e is running.");
+	Separator();
 	ImGui::InputInt("Randomize inputs every X frames", &fSystem::nRandomizeLocalInputsEveryXFramesInGGPO);
 	ImGui::Checkbox("Show debug data?", &bDebug);
 	Separator();
@@ -1979,6 +1981,15 @@ void DrawTaskWindow(bool* pOpen) {
 	End();
 }
 
+int OnMainMenuModeSelected(int mode) {
+	if (mode == rMainMenu::MainMenuItemID::MMI_NETWORK) {
+		show_network_window = true;
+		return 1;
+	}
+
+	return 0;
+}
+
 void InitializeOverlay(HWND hWnd, IDirect3DDevice9* lpDevice) {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
@@ -1988,6 +1999,7 @@ void InitializeOverlay(HWND hWnd, IDirect3DDevice9* lpDevice) {
 	ImGui::GetIO().SetPlatformImeDataFn = nullptr;
 	ImGui_ImplWin32_Init(hWnd);
 	ImGui_ImplDX9_Init(lpDevice);
+	fMainMenu::OnModeSelectedOverride = OnMainMenuModeSelected;
 }
 
 void DrawOverlay() {
