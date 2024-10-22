@@ -5,6 +5,11 @@
 namespace Dimps {
 	namespace Pad {
 		void Locate(HMODULE peRoot);
+		
+		enum PadType {
+			PADTYPE_RAWINPUT = 1,
+			PADTYPE_XINPUT = 3,
+		};
 
 		struct System {
 			static const int BUTTON_MAPPING_FIGHT;
@@ -39,6 +44,34 @@ namespace Dimps {
 
 			typedef struct __staticMethods {
 				System* (*GetSingleton)();
+			} __staticMethods;
+
+			static void Locate(HMODULE peRoot);
+			static __publicMethods publicMethods;
+			static __staticMethods staticMethods;
+		};
+
+		struct System_RawInput {
+			typedef struct __publicMethods {
+				unsigned int(System_RawInput::* SetDeviceInUse)(int deviceIdx, int bInUse);
+			} __publicMethods;
+
+			typedef struct __staticMethods {
+				System_RawInput* (*GetSingleton)();
+			} __staticMethods;
+
+			static void Locate(HMODULE peRoot);
+			static __publicMethods publicMethods;
+			static __staticMethods staticMethods;
+		};
+
+		struct System_XInput {
+			typedef struct __publicMethods {
+				unsigned int(System_XInput::* SetDeviceInUse)(int deviceIdx, int bInUse);
+			} __publicMethods;
+
+			typedef struct __staticMethods {
+				System_XInput* (*GetSingleton)();
 			} __staticMethods;
 
 			static void Locate(HMODULE peRoot);

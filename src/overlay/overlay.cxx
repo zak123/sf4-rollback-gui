@@ -53,6 +53,7 @@ namespace rBattle = Dimps::Game::Battle;
 namespace rVfx = Dimps::Game::Battle::Vfx;
 namespace rStageSelect = Dimps::GameEvents::StageSelect;
 namespace rHud = Dimps::Game::Battle::Hud;
+namespace rPad = Dimps::Pad;
 namespace fHud = sf4e::Game::Battle::Hud;
 
 using CameraUnit = Dimps::Game::Battle::Camera::Unit;
@@ -1085,6 +1086,18 @@ void DrawNetworkWindow(bool* pOpen) {
 					deviceIdx = (p->*methods.GetDeviceIndexForPlayer)(0);
 					deviceType = (p->*methods.GetDeviceTypeForPlayer)(0);
 					(p->*methods.SetSideHasAssignedController)(0, 0);
+					switch (deviceType) {
+					case rPad::PADTYPE_RAWINPUT:
+						(
+							rPad::System_RawInput::staticMethods.GetSingleton()->*rPad::System_RawInput::publicMethods.SetDeviceInUse
+						)(deviceIdx, 0);
+						break;
+					case rPad::PADTYPE_XINPUT:
+						(
+							rPad::System_XInput::staticMethods.GetSingleton()->*rPad::System_XInput::publicMethods.SetDeviceInUse
+						)(deviceIdx, 0);
+						break;
+					}
 					netState = NWS_DECIDE;
 				}
 				else {
