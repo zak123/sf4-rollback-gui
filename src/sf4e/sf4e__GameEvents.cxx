@@ -12,8 +12,9 @@
 using Dimps::Game::Request;
 
 namespace rGameEvents = Dimps::GameEvents;
-using rEventBase = Dimps::Event::EventBase;
-using rEventController = Dimps::Event::EventController;
+using Dimps::Event::EventBase;
+using Dimps::Event::EventBaseWithEC;
+using Dimps::Event::EventController;
 using rMainMenu = rGameEvents::MainMenu;
 using rRootEvent = rGameEvents::RootEvent;
 using rVsBattle = rGameEvents::VsBattle;
@@ -26,15 +27,11 @@ namespace fGameEvents = sf4e::GameEvents;
 using fMainMenu = fGameEvents::MainMenu;
 using fRootEvent = fGameEvents::RootEvent;
 using fVsBattle = fGameEvents::VsBattle;
-using fVsCharaSelect = fGameEvents::VsCharaSelect;
-using fVsMode = fGameEvents::VsMode;
 using fVsPreBattle = fGameEvents::VsPreBattle;
 using fVsStageSelect = fGameEvents::VsStageSelect;
 
 int (*fMainMenu::OnModeSelectedOverride)(int mode);
-rMainMenu* fMainMenu::instance = nullptr;
 int fMainMenu::bOverrideItemObserverState = -1;
-rVsMode* fVsMode::instance = nullptr;
 void (*fVsBattle::OnTasksRegistered)() = nullptr;
 void (*fVsPreBattle::OnTasksRegistered)() = nullptr;
 
@@ -114,36 +111,24 @@ PlayerData, 0, MainMenu, BLACK, 30.0f, BLACK, 30.0f
 	Signout, 0, Title, BLACK, 30.0f, BLACK, 30.0f			
 	StorageNotice, 0, Title, BLACK, 30.0f, BLACK, 30.0f		
 )";
-rVsCharaSelect* fVsCharaSelect::instance;
 
 bool fVsStageSelect::forceTimerOnNextStageSelect = false;
-rVsStageSelect* fVsStageSelect::instance;
 
 void fGameEvents::Install() {
 	MainMenu::Install();
 	RootEvent::Install();
 	VsBattle::Install();
-	VsCharaSelect::Install();
-	VsMode::Install();
 	VsPreBattle::Install();
 	VsStageSelect::Install();
 }
 
 void fMainMenu::Install() {
-	void* (fMainMenu:: * _fDestroy)(DWORD) = &Destroy;
 	int (fMainMenu:: * _fGetItemObserverState)() = &GetItemObserverState;
 	void (fMainMenu:: * _fOnModeSelected)(int) = &OnModeSelected;
-	DetourAttach((PVOID*)&rMainMenu::publicMethods.Destroy, *(PVOID*)&_fDestroy);
 	DetourAttach((PVOID*)&rMainMenu::itemObserverMethods.GetItemObserverState, *(PVOID*)&_fGetItemObserverState);
 	DetourAttach((PVOID*)&rMainMenu::itemObserverMethods.OnModeSelected, *(PVOID*)&_fOnModeSelected);
-	DetourAttach((PVOID*)&rMainMenu::staticMethods.Factory, &Factory);
 }
 
-rMainMenu* fMainMenu::Factory(DWORD arg1, DWORD arg2, DWORD arg3) {
-	rMainMenu* out = rMainMenu::staticMethods.Factory(arg1, arg2, arg3);
-	instance = out;
-	return out;
-}
 
 int fMainMenu::GetItemObserverState() {
 	if (bOverrideItemObserverState != -1) {
@@ -151,18 +136,6 @@ int fMainMenu::GetItemObserverState() {
 	}
 
 	return (this->*rMainMenu::itemObserverMethods.GetItemObserverState)();
-}
-
-void* fMainMenu::Destroy(DWORD arg1) {
-	rMainMenu* _this = (rMainMenu*)this;
-	if (instance == this) {
-		instance = NULL;
-	}
-	else {
-		MessageBox(NULL, TEXT("MainMenu not tracked that was destroyed!"), NULL, MB_OK);
-	}
-
-	return (_this->*rMainMenu::publicMethods.Destroy)(arg1);
 }
 
 void fMainMenu::OnModeSelected(int mode) {
@@ -221,8 +194,8 @@ void fVsBattle::Install() {
 int fVsBattle::CheckAndMaybeExitBasedOnExitType() {
 	if (bTerminateOnNextLeftBattle) {
 		bTerminateOnNextLeftBattle = false;
-		rEventController* c = *rEventBase::GetSourceController(this);
-		(c->*rEventController::publicMethods.EnterTerminalState)(0, 0);
+		EventController* c = *EventBase::GetSourceController(this);
+		(c->*EventController::publicMethods.EnterTerminalState)(0, 0);
 		return 1;
 	}
 
@@ -242,7 +215,7 @@ int fVsBattle::HasInitialized() {
 
 BOOL fVsBattle::IsTerminationComplete() {
 	rVsBattle* _this = (rVsBattle*)this;
-	if (!(_this->*rEventBase::publicMethods.IsTerminationComplete)()) {
+	if (!(_this->*EventBase::publicMethods.IsTerminationComplete)()) {
 		// The real system hasn't terminated yet.
 		return 0;
 	}
@@ -277,54 +250,6 @@ void fVsBattle::RegisterTasks() {
 	}
 }
 
-void fVsCharaSelect::Install() {
-	void* (fVsCharaSelect:: * _fDestroy)(DWORD) = &Destroy;
-	DetourAttach((PVOID*)&rVsCharaSelect::publicMethods.Destroy, *(PVOID*)&_fDestroy);
-	DetourAttach((PVOID*)&rVsCharaSelect::staticMethods.Factory, &Factory);
-}
-
-rVsCharaSelect* fVsCharaSelect::Factory(DWORD arg1, DWORD arg2, DWORD arg3) {
-	rVsCharaSelect* out = rVsCharaSelect::staticMethods.Factory(arg1, arg2, arg3);
-	instance = out;
-	return out;
-}
-
-void* fVsCharaSelect::Destroy(DWORD arg1) {
-	rVsCharaSelect* _this = (rVsCharaSelect*)this;
-	if (instance == this) {
-		instance = NULL;
-	}
-	else {
-		MessageBox(NULL, TEXT("VsCharaSelect not tracked that was destroyed!"), NULL, MB_OK);
-	}
-	
-	return (_this->*rVsCharaSelect::publicMethods.Destroy)(arg1);
-}
-
-void fVsMode::Install() {
-	void* (fVsMode:: * _fDestroy)(DWORD) = &Destroy;
-	DetourAttach((PVOID*)&rVsMode::publicMethods.Destroy, *(PVOID*)&_fDestroy);
-	DetourAttach((PVOID*)&rVsMode::staticMethods.Factory, &Factory);
-}
-
-rVsMode* fVsMode::Factory(DWORD arg1, DWORD arg2, DWORD arg3) {
-	rVsMode* out = rVsMode::staticMethods.Factory(arg1, arg2, arg3);
-	instance = out;
-	return out;
-}
-
-void* fVsMode::Destroy(DWORD arg1) {
-	rVsMode* _this = (rVsMode*)this;
-	if (instance == this) {
-		instance = NULL;
-	}
-	else {
-		MessageBox(NULL, TEXT("VsMode that was not tracked was destroyed!"), NULL, MB_OK);
-	}
-
-	return (_this->*rVsMode::publicMethods.Destroy)(arg1);
-}
-
 void fVsPreBattle::Install() {
 	void (fVsPreBattle:: * _fRegisterTasks)() = &RegisterTasks;
 	DetourAttach((PVOID*)&fVsPreBattle::publicMethods.RegisterTasks, *(PVOID*)&_fRegisterTasks);
@@ -344,28 +269,13 @@ void fVsPreBattle::RegisterTasks() {
 }
 
 void fVsStageSelect::Install() {
-	void* (fVsStageSelect::* _fDestroy)(DWORD) = &Destroy;
-	DetourAttach((PVOID*)&rVsStageSelect::publicMethods.Destroy, *(PVOID*)&_fDestroy);
 	DetourAttach((PVOID*)&rVsStageSelect::staticMethods.Factory, &Factory);
 }
 
 rVsStageSelect* fVsStageSelect::Factory(DWORD arg1, DWORD arg2, DWORD arg3) {
 	rVsStageSelect* out = rVsStageSelect::staticMethods.Factory(arg1, arg2, arg3);
-	instance = out;
 	if (forceTimerOnNextStageSelect) {
-		rVsStageSelect::GetState(instance)->flags |= StageSelectState::SSSF_TIMER_ENABLED;
+		rVsStageSelect::GetState(out)->flags |= StageSelectState::SSSF_TIMER_ENABLED;
 	}
 	return out;
-}
-
-void* fVsStageSelect::Destroy(DWORD arg1) {
-	rVsStageSelect* _this = (rVsStageSelect*)this;
-	if (instance == this) {
-		instance = NULL;
-	}
-	else {
-		MessageBox(NULL, TEXT("VsStageSelect not tracked that was destroyed!"), NULL, MB_OK);
-	}
-	
-	return (_this->*rVsStageSelect::publicMethods.Destroy)(arg1);
 }

@@ -24,14 +24,15 @@
 using nlohmann::json;
 
 namespace SessionProtocol = sf4e::SessionProtocol;
+using Dimps::App;
 using Dimps::Event::EventBase;
+using Dimps::Event::EventBaseWithEC;
 using Dimps::Event::EventController;
 using rSystem = Dimps::Game::Battle::System;
 using rMainMenu = Dimps::GameEvents::MainMenu;
 using rVsMode = Dimps::GameEvents::VsMode;
 using fMainMenu = sf4e::GameEvents::MainMenu;
 using fSystem = sf4e::Game::Battle::System;
-using fVsMode = sf4e::GameEvents::VsMode;
 using fVsBattle = sf4e::GameEvents::VsBattle;
 using fVsPreBattle = sf4e::GameEvents::VsPreBattle;
 using sf4e::SessionClient;
@@ -234,7 +235,13 @@ int SessionClient::Step()
 				// Since handling a request forces the process to load into a battle,
 				// handling the request can only reasonably be done if the process is
 				// currently on the main menu.
-				if (fMainMenu::instance == NULL) {
+				char* mainMenuQuery[1] = { "MainMenu" };
+				rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(
+					App::GetRootEvent(),
+					mainMenuQuery,
+					1
+				);
+				if (!mainMenu) {
 					spdlog::info("Client: ignoring that both clients are ready because we're not on the main menu");
 					continue;
 				}
@@ -243,7 +250,7 @@ int SessionClient::Step()
 				fVsPreBattle::bSkipToVersus = true;
 				fVsPreBattle::OnTasksRegistered = _OnVsPreBattleTasksRegistered;
 				fVsBattle::OnTasksRegistered = _OnVsBattleTasksRegistered;
-				(rMainMenu::ToItemObserver(fMainMenu::instance)->*rMainMenu::itemObserverMethods.GoToVersusMode)();
+				(rMainMenu::ToItemObserver(mainMenu)->*rMainMenu::itemObserverMethods.GoToVersusMode)();
 
 			}
 		}
@@ -427,11 +434,17 @@ void SessionClient::_OnVsPreBattleTasksRegistered()
 	SessionClient* _this = s_pCallbackInstance;
 	size_t charaConditionSize = sizeof(rVsMode::ConfirmedCharaConditions);
 
-	// XXX (adanducci): this is fragile- passing in the VsPreBattle event and
-	// traversing the parent events would avoid the need to track state that
-	// could potentially interleave with other event construction and
-	// destruction.
-	rVsMode* mode = fVsMode::instance;
+	// XXX (adanducci): this is a little fragile- it's technically possible
+	// that the pre-battle event is constructed in another context, but
+	// practically speaking the VsPreBattle event will always be used in
+	// the context of VsMode.
+	char* vsModeQuery[] = { "VSMode" };
+	rVsMode* mode = (rVsMode*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsModeQuery, 1);
+	if (!mode) {
+		spdlog::error("VsPreBattle tasks registered, but the current foreground event isn't VSMode!");
+		return;
+	}
+
 	Dimps::Platform::dString* stageName = rVsMode::GetStageName(mode);
 	rVsMode::ConfirmedPlayerConditions* conditions = rVsMode::GetConfirmedPlayerConditions(mode);
 	for (int i = 0; i < 2; i++) {

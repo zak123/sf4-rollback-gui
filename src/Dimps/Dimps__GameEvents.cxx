@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include "Dimps__Event.hxx"
 #include "Dimps__Game.hxx"
 #include "Dimps__GameEvents.hxx"
 #include "Dimps__Platform.hxx"
@@ -7,6 +8,8 @@
 namespace GameEvents = Dimps::GameEvents;
 namespace StageSelect = Dimps::GameEvents::StageSelect;
 
+using Dimps::Event::EventBaseWithEC;
+using Dimps::Event::EventController;
 using Dimps::Game::Request;
 using GameEvents::MainMenu;
 using GameEvents::RootEvent;

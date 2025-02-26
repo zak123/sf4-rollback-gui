@@ -67,10 +67,12 @@ using SoundUnit = Dimps::Game::Battle::Sound::Unit;
 using PadSystem = Dimps::Pad::System;
 using VfxUnit = rVfx::Unit;
 
+using Dimps::App;
 using Dimps::Eva::Task;
 using Dimps::Eva::TaskCore;
 using Dimps::Eva::TaskCoreRegistry;
 using Dimps::Event::EventBase;
+using Dimps::Event::EventBaseWithEC;
 using Dimps::Event::EventController;
 using Dimps::Game::Request;
 using Dimps::Game::Battle::Command::CommandImpl;
@@ -81,6 +83,7 @@ using Dimps::Game::Battle::Vfx::ColorFadeUnit;
 using rSoundPlayerManager = Dimps::Game::Battle::Sound::SoundPlayerManager;
 using Dimps::Game::GameMementoKey;
 using rMainMenu = Dimps::GameEvents::MainMenu;
+using Dimps::GameEvents::RootEvent;
 using Dimps::GameEvents::VsCharaSelect;
 using rVsMode = Dimps::GameEvents::VsMode;
 using Dimps::GameEvents::VsStageSelect;
@@ -98,8 +101,6 @@ using fSystem = sf4e::Game::Battle::System;
 using fColorFade = sf4e::Game::Battle::Vfx::ColorFade;
 using fMainMenu = sf4e::GameEvents::MainMenu;
 using fVsBattle = sf4e::GameEvents::VsBattle;
-using fVsCharaSelect = sf4e::GameEvents::VsCharaSelect;
-using fVsMode = sf4e::GameEvents::VsMode;
 using fVsPreBattle = sf4e::GameEvents::VsPreBattle;
 using fVsStageSelect = sf4e::GameEvents::VsStageSelect;
 using fPadSystem = sf4e::Pad::System;
@@ -651,11 +652,17 @@ void DrawEventWindow(bool* pOpen) {
 }
 
 void _OnPreBattleTasksRegistered() {
-	// XXX (adanducci): this is fragile- passing in the VsPreBattle event and
-	// traversing the parent events would avoid the need to track state that
-	// could potentially interleave with other event construction and
-	// destruction.
-	rVsMode* mode = fVsMode::instance;
+	// XXX (adanducci): this is a little fragile- it's technically possible
+	// that the pre-battle event is constructed in another context, but
+	// practically speaking the VsPreBattle event will always be used in
+	// the context of VsMode.
+	char* vsModeQuery[] = { "VSMode" };
+	rVsMode* mode = (rVsMode*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsModeQuery, 1);
+	if (!mode) {
+		spdlog::error("Overlay: VsPreBattle tasks registered, but the current foreground event isn't VSMode!");
+		return;
+	}
+
 	Dimps::Platform::dString* stageName = rVsMode::GetStageName(mode);
 	rVsMode::ConfirmedPlayerConditions* conditions = rVsMode::GetConfirmedPlayerConditions(mode);
 	size_t charaConditionSize = sizeof(rVsMode::ConfirmedCharaConditions);
@@ -824,14 +831,21 @@ void DrawMainMenuWindow(bool* pOpen) {
 		ImGuiWindowFlags_None
 	);
 
-	if (fMainMenu::instance == NULL) {
-		Text("No instance");
+	char* mainMenuQuery[1] = { "MainMenu" };
+	rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(
+		App::GetRootEvent(),
+		mainMenuQuery,
+		1
+	);
+
+	if (!mainMenu) {
+		Text("Main menu not running");
 		End();
 		return;
 	}
 
-	Text("Instance: %p", fMainMenu::instance);
-	Text("Name: %s", EventBase::GetName(fMainMenu::instance));
+	Text("Instance: %p", mainMenu);
+	Text("Name: %s", EventBase::GetName(mainMenu));
 	ImGui::Checkbox("VS mode: Skip chara/stage select?", &mainMenuShouldJump);
 	if (mainMenuShouldJump) {
 		ImGui::Combo("Stage", &mainMenuJumpStageID, Dimps::stageNames, 30);
@@ -897,7 +911,14 @@ void DrawMainMenuWindow(bool* pOpen) {
 			(padSys->*padSysMethods.SetSideHasAssignedController)(1, 1);
 			(padSys->*padSysMethods.SetActiveButtonMapping)(PadSystem::BUTTON_MAPPING_FIGHT);
 		}
-		(rMainMenu::ToItemObserver(fMainMenu::instance)->*rMainMenu::itemObserverMethods.GoToVersusMode)();
+
+		char* mainMenuQuery[1] = { "MainMenu" };
+		rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(
+			App::GetRootEvent(),
+			mainMenuQuery,
+			1
+		);
+		(rMainMenu::ToItemObserver(mainMenu)->*rMainMenu::itemObserverMethods.GoToVersusMode)();
 	}
 
 	End();
@@ -923,7 +944,9 @@ void DrawNetworkJoinPanel(uint8_t deviceIdx, uint8_t deviceType) {
 	static char name[32] = { 0 };
 	static char joinAddr[64] = { 0 };
 
-	if (!fMainMenu::instance) {
+	char* mainMenuQuery[1] = { "MainMenu" };
+	rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), mainMenuQuery, 1);
+	if (!mainMenu) {
 		Text("Must be on the main menu to connect");
 		return;
 	}
@@ -945,7 +968,9 @@ void DrawNetworkHostPanel(uint8_t deviceIdx, uint8_t deviceType) {
 	static uint16 hostPort = 23456;
 	static uint16 ggpoPort = 23457;
 
-	if (!fMainMenu::instance) {
+	char* mainMenuQuery[1] = { "MainMenu" };
+	rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), mainMenuQuery, 1);
+	if (!mainMenu) {
 		Text("Must be on the main menu to listen");
 		return;
 	}
@@ -1774,15 +1799,17 @@ void DrawVsCharaSelectWindow(bool* pOpen) {
 		ImGuiWindowFlags_None
 	);
 
-	if (fVsCharaSelect::instance == NULL) {
+	char* vsCharaSelectQuery[] = { "VSMode", "PreBattle", "CharaSelect" };
+	VsCharaSelect* charaSelect = (VsCharaSelect*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsCharaSelectQuery, 3);
+	if (!charaSelect) {
 		Text("No instance");
 		End();
 		return;
 	}
 
 
-	VsCharaSelect::CharaSelectState* state = VsCharaSelect::GetState(fVsCharaSelect::instance);
-	Text("Instance: %p", fVsCharaSelect::instance);
+	VsCharaSelect::CharaSelectState* state = VsCharaSelect::GetState(charaSelect);
+	Text("Instance: %p", charaSelect);
 	Text("Flags: %x", state->flags);
 	if (BeginTabBar("VsCharaSelect tabs", ImGuiTabBarFlags_None)) {
 		if (BeginTabItem("Player 1")) {
@@ -1817,13 +1844,16 @@ void DrawVsStageSelectWindow(bool* pOpen) {
 	ImGui::Checkbox("Force timer on next vs-stage-select?", &fVsStageSelect::forceTimerOnNextStageSelect);
 	ImGui::InputText("Stage code to inject", newStageCode, 4);
 
-	if (fVsStageSelect::instance == NULL) {
+
+	char* vsStageSelectQuery[] = { "VSMode", "PreBattle", "StageSelect" };
+	VsStageSelect* stageSelect = (VsStageSelect*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsStageSelectQuery, 3);
+	if (!stageSelect) {
 		Text("No instance");
 		End();
 		return;
 	}
 	
-	rStageSelect::Control* control = VsStageSelect::GetControl(fVsStageSelect::instance);
+	rStageSelect::Control* control = VsStageSelect::GetControl(stageSelect);
 
 	if (Button("set stage cursor")) {
 		(control->*rStageSelect::Control::publicMethods.SetStageCursor)(newStageCode);
@@ -1832,8 +1862,8 @@ void DrawVsStageSelectWindow(bool* pOpen) {
 		(control->*rStageSelect::Control::publicMethods.SelectStage)(newStageCode);
 	}
 
-	VsStageSelect::StageSelectState* state = VsStageSelect::GetState(fVsStageSelect::instance);
-	Text("Instance: %p", fVsStageSelect::instance);
+	VsStageSelect::StageSelectState* state = VsStageSelect::GetState(stageSelect);
+	Text("Instance: %p", stageSelect);
 	Text("Flags: %x", state->flags);
 	Text("Phase: %x", (control->*rStageSelect::Control::publicMethods.GetPhase)());
 	Text("Stage code 1: %s", &state->stageCode1);

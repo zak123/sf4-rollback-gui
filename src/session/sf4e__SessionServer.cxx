@@ -21,13 +21,6 @@
 using nlohmann::json;
 
 namespace SessionProtocol = sf4e::SessionProtocol;
-using Dimps::Event::EventBase;
-using Dimps::Event::EventController;
-using rVsMode = Dimps::GameEvents::VsMode;
-using fMainMenu = sf4e::GameEvents::MainMenu;
-using fSystem = sf4e::Game::Battle::System;
-using fVsMode = sf4e::GameEvents::VsMode;
-using fVsPreBattle = sf4e::GameEvents::VsPreBattle;
 using sf4e::SessionServer;
 
 

@@ -36,7 +36,7 @@ namespace Dimps {
 			};
 		}
 
-		struct RootEvent : Dimps::Event::EventBase {
+		struct RootEvent : Dimps::Event::EventBaseWithEC {
 			static char** eventFlowDefinition;
 
 			static void Locate(HMODULE peRoot);
@@ -172,7 +172,7 @@ namespace Dimps {
 			static Game::Request** GetRequest(VsBattle* battleEvent);
 		};
 
-		struct VsMode : Dimps::Event::EventBase {
+		struct VsMode : Dimps::Event::EventBaseWithEC {
 			struct ConfirmedCharaConditions {
 				BYTE charaID;
 				BYTE costume;
@@ -210,7 +210,7 @@ namespace Dimps {
 			static __staticMethods staticMethods;
 		};
 
-		struct VsPreBattle : Dimps::Event::EventBase {
+		struct VsPreBattle : Dimps::Event::EventBaseWithEC {
 			static void Locate(HMODULE peRoot);
 
 			typedef struct __publicMethods {

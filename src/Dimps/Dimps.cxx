@@ -13,6 +13,7 @@ char** Dimps::characterCodes;
 char** Dimps::characterNames;
 char** Dimps::stageCodes;
 char** Dimps::stageNames;
+Dimps::GameEvents::RootEvent* (*Dimps::App::GetRootEvent)();
 
 void Dimps::Locate(HMODULE peRoot) {
 	unsigned int peRootOffset = (unsigned int)peRoot;
@@ -22,11 +23,18 @@ void Dimps::Locate(HMODULE peRoot) {
 	stageCodes = (char**)(peRootOffset + 0x66b678);
 	stageNames = (char**)(peRootOffset + 0x66b600);
 
-	Dimps::Eva::Locate(peRoot);
-	Dimps::Event::Locate(peRoot);
-	Dimps::Game::Locate(peRoot);
-	Dimps::GameEvents::Locate(peRoot);
-	Dimps::Pad::Locate(peRoot);
-	Dimps::Platform::Locate(peRoot);
-	Dimps::UserApp::Locate(peRoot);
+	App::Locate(peRoot);
+	Eva::Locate(peRoot);
+	Event::Locate(peRoot);
+	Game::Locate(peRoot);
+	GameEvents::Locate(peRoot);
+	Pad::Locate(peRoot);
+	Platform::Locate(peRoot);
+	UserApp::Locate(peRoot);
+}
+
+void Dimps::App::Locate(HMODULE peRoot) {
+	unsigned int peRootOffset = (unsigned int)peRoot;
+
+	GetRootEvent = (GameEvents::RootEvent*(*)())(peRootOffset + 0x0299e0);
 }
