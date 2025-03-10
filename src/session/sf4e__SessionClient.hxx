@@ -53,8 +53,12 @@ namespace sf4e {
 		int64_t _outstandingReadyRequestNumber = -1;
 		bool _snapshotsEnabled;
 
-		EResult SetMatchConditions(SessionProtocol::SetConditionsRequest& r);
-		EResult ReportResults(SessionProtocol::ReportResultsRequest& r);
+		EResult Lobby_Ready();
+		EResult Lobby_ReportResults(int loserSide);
+
+		EResult PreBattle_SetEnv(uint32_t rngSeed);
+		EResult PreBattle_SetChara(const Dimps::GameEvents::VsMode::ConfirmedCharaConditions& chara);
+		EResult PreBattle_SetStage(int32_t stageID);
 
 		// Public for testing
 		EResult Send(nlohmann::json& msg, int64_t* outMessageNum);

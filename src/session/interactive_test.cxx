@@ -22,9 +22,11 @@ using ImGui::Separator;
 using ImGui::Text;
 
 using sf4e::SessionClient;
-using sf4e::SessionProtocol::JoinRequest;
-using sf4e::SessionProtocol::SetConditionsRequest;
-using sf4e::SessionProtocol::ReportResultsRequest;
+using sf4e::SessionProtocol::SessionJoinRequest;
+using sf4e::SessionProtocol::PreBattleSetChara;
+using sf4e::SessionProtocol::PreBattleSetEnv;
+using sf4e::SessionProtocol::PreBattleSetStage;
+using sf4e::SessionProtocol::LobbyReportResults;
 using sf4e::SessionProtocol::LobbyData;
 using sf4e::SessionProtocol::MatchData;
 using sf4e::SessionServer;
@@ -50,8 +52,10 @@ struct TestingSessionClient {
     std::deque<std::string> alerts;
     SessionClient c;
     int menuCharaID;
-    SetConditionsRequest setConditionsReqBuf;
-    ReportResultsRequest reportResultsReqBuf;
+    PreBattleSetChara charaMsg;
+    PreBattleSetEnv envMsg;
+    PreBattleSetStage stageMsg;
+    LobbyReportResults reportResultsReqBuf;
 
     TestingSessionClient(
         std::string sidecarHash,
@@ -72,17 +76,17 @@ struct TestingSessionClient {
             delay
         ), menuCharaID(0)
     {
-        setConditionsReqBuf.rngSeed = 0;
-        setConditionsReqBuf.stageID = 0;
-        setConditionsReqBuf.chara.charaID = 0;
-        setConditionsReqBuf.chara.costume = 0;
-        setConditionsReqBuf.chara.color = 0;
-        setConditionsReqBuf.chara._unused = 0;
-        setConditionsReqBuf.chara.personalAction = 0;
-        setConditionsReqBuf.chara.winQuote = 0;
-        setConditionsReqBuf.chara.ultraCombo = 0;
-        setConditionsReqBuf.chara.handicap = 0;
-        setConditionsReqBuf.chara.unc_edition = 0;
+        envMsg.rngSeed = 0;
+        stageMsg.stageID = 0;
+        charaMsg.chara.charaID = 0;
+        charaMsg.chara.costume = 0;
+        charaMsg.chara.color = 0;
+        charaMsg.chara._unused = 0;
+        charaMsg.chara.personalAction = 0;
+        charaMsg.chara.winQuote = 0;
+        charaMsg.chara.ultraCombo = 0;
+        charaMsg.chara.handicap = 0;
+        charaMsg.chara.unc_edition = 0;
         reportResultsReqBuf.loserSide = 0;
     }
 
@@ -193,34 +197,35 @@ void DrawServerSessionInfo(const std::vector<SessionServer::SessionMember>& clie
 }
 
 int DrawSetConditionsForm(TestingSessionClient& client) {
-    SetConditionsRequest& req = client.setConditionsReqBuf;
     static const int stepSize = 1;
 
-    ImGui::InputScalar("RNG seed", ImGuiDataType_U32, &req.rngSeed);
-    ImGui::InputInt("Stage ID", &req.stageID);
+    ImGui::InputScalar("RNG seed", ImGuiDataType_U32, &client.envMsg.rngSeed);
+    ImGui::InputInt("Stage ID", &client.stageMsg.stageID);
     ImGui::Combo("Chara", &client.menuCharaID, characterNames, NUM_STUB_CHARAS);
-    req.chara.charaID = client.menuCharaID;
-    ImGui::InputScalar("Color", ImGuiDataType_U8, &req.chara.color, &stepSize);
-    ImGui::InputScalar("Costume", ImGuiDataType_U8, &req.chara.costume, &stepSize);
-    ImGui::InputScalar("Handicap", ImGuiDataType_U8, &req.chara.handicap, &stepSize);
-    ImGui::InputScalar("Personal action", ImGuiDataType_U8, &req.chara.personalAction, &stepSize);
-    ImGui::InputScalar("Ultra Combo", ImGuiDataType_U8, &req.chara.ultraCombo, &stepSize);
-    ImGui::InputScalar("Edition", ImGuiDataType_U8, &req.chara.unc_edition, &stepSize);
-    ImGui::InputScalar("Win quote", ImGuiDataType_U8, &req.chara.winQuote, &stepSize);
+    client.charaMsg.chara.charaID = client.menuCharaID;
+    ImGui::InputScalar("Color", ImGuiDataType_U8, &client.charaMsg.chara.color, &stepSize);
+    ImGui::InputScalar("Costume", ImGuiDataType_U8, &client.charaMsg.chara.costume, &stepSize);
+    ImGui::InputScalar("Handicap", ImGuiDataType_U8, &client.charaMsg.chara.handicap, &stepSize);
+    ImGui::InputScalar("Personal action", ImGuiDataType_U8, &client.charaMsg.chara.personalAction, &stepSize);
+    ImGui::InputScalar("Ultra Combo", ImGuiDataType_U8, &client.charaMsg.chara.ultraCombo, &stepSize);
+    ImGui::InputScalar("Edition", ImGuiDataType_U8, &client.charaMsg.chara.unc_edition, &stepSize);
+    ImGui::InputScalar("Win quote", ImGuiDataType_U8, &client.charaMsg.chara.winQuote, &stepSize);
 
     if (Button("Send set conditions")) {
-        return client.c.SetMatchConditions(req);
+        client.c.PreBattle_SetChara(client.charaMsg.chara);
+        client.c.PreBattle_SetEnv(client.envMsg.rngSeed);
+        client.c.PreBattle_SetStage(client.stageMsg.stageID);
+        client.c.Lobby_Ready();
     }
 
     return k_EResultNone;
 }
 
 int DrawResultsForm(TestingSessionClient& client) {
-    ReportResultsRequest& req = client.reportResultsReqBuf;
-    ImGui::InputInt("Loser side", &req.loserSide);
+    ImGui::InputInt("Loser side", &client.reportResultsReqBuf.loserSide);
 
     if (Button("Send results")) {
-        return client.c.ReportResults(req);
+        return client.c.Lobby_ReportResults(client.reportResultsReqBuf.loserSide);
     }
 
     return k_EResultNone;
@@ -294,7 +299,7 @@ int DrawClientWindow(int idx, TestingSessionClient& client) {
     }
     else {
         if (Button("Send join")) {
-            JoinRequest request;
+            SessionJoinRequest request;
             request.sidecarHash = client.c._sidecarHash;
             request.username = client.c._name;
             request.port = client.c._ggpoPort;

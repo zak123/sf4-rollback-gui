@@ -95,7 +95,6 @@ int SessionServer::Step()
 			spdlog::info("Server: got a non-json message");
 			continue;
 		}
-		
 
 		SessionProtocol::MessageType type;
 		try {
@@ -106,14 +105,14 @@ int SessionServer::Step()
 			continue;
 		}
 
-		if (type == SessionProtocol::MT_JOIN_REQ) {
-			SessionProtocol::JoinRequest request;
+		if (type == SessionProtocol::MT_SESSION_JOINREQ) {
+			SessionProtocol::SessionJoinRequest request;
 			try {
 				msg.get_to(request);
 			}
 			catch (json::exception e) {
 				spdlog::info("Server: could not deserialize join request");
-				SessionProtocol::JoinReject reject;
+				SessionProtocol::SessionJoinReject reject;
 				reject.result = SessionProtocol::JR_REQUEST_INVALID;
 				json rejectMsg = reject;
 				Respond(conn, rejectMsg);
@@ -124,7 +123,7 @@ int SessionServer::Step()
 			SessionProtocol::JoinResult joinResult = RegisterToWait(conn, request.port, request.sidecarHash, request.username, peerAddr);
 			if (joinResult != SessionProtocol::JOIN_OK) {
 				spdlog::info("Server: rejecting registration for reason {}", (int)joinResult);
-				SessionProtocol::JoinReject reject;
+				SessionProtocol::SessionJoinReject reject;
 				reject.result = joinResult;
 				json rejectMsg = reject;
 				Respond(conn, rejectMsg);
@@ -133,7 +132,7 @@ int SessionServer::Step()
 
 			_dataDirty = true;
 		}
-		else if (type == SessionProtocol::MT_SET_CONDITIONS) {
+		else if (type == SessionProtocol::MT_PREBATTLE_SETCHARA) {
 			int side = -1;
 			for (int i = 0; i < 2; i++) {
 				if (clients.size() > i && clients.at(i).conn == conn) {
@@ -142,11 +141,34 @@ int SessionServer::Step()
 				}
 			}
 			if (side == -1) {
-				spdlog::info("Server: sender {} tried to update conditions, but is not playing", conn);
+				spdlog::info("Server: sender {} tried to set chara, but is not playing", conn);
 				continue;
 			}
 
-			SessionProtocol::SetConditionsRequest request;
+			SessionProtocol::PreBattleSetChara request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize SetConditionsRequest");
+				continue;
+			}
+			_matchData.chara[side] = request.chara;
+			_dataDirty = true;
+		}
+		else if (type == SessionProtocol::MT_PREBATTLE_SETENV) {
+			int side = -1;
+			for (int i = 0; i < 2; i++) {
+				if (clients.size() > i && clients.at(i).conn == conn) {
+					side = i;
+					break;
+				}
+			}
+			if (side != 0) {
+				spdlog::info("Server: sender {} tried to set env, but is not playing", conn);
+				continue;
+			}
+			SessionProtocol::PreBattleSetEnv request;
 			try {
 				msg.get_to(request);
 			}
@@ -155,16 +177,59 @@ int SessionServer::Step()
 				continue;
 			}
 
-			_matchData.readyMessageNum[side] = pIncomingMsg->GetMessageNumber();
-			_matchData.chara[side] = request.chara;
-			if (side == 0) {
-				_matchData.rngSeed = request.rngSeed;
-				_matchData.stageID = request.stageID;
-			}
+			_matchData.rngSeed = request.rngSeed;
 			_dataDirty = true;
 		}
-		else if (type == SessionProtocol::MT_REPORT_RESULTS) {
-			SessionProtocol::ReportResultsRequest request;
+		else if (type == SessionProtocol::MT_PREBATTLE_SETSTAGE) {
+			int side = -1;
+			for (int i = 0; i < 2; i++) {
+				if (clients.size() > i && clients.at(i).conn == conn) {
+					side = i;
+					break;
+				}
+			}
+			if (side != 0) {
+				spdlog::info("Server: sender {} tried to set stage, but is not playing", conn);
+				continue;
+			}
+			SessionProtocol::PreBattleSetStage request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize SetConditionsRequest");
+				continue;
+			}
+
+			_matchData.stageID = request.stageID;
+			_dataDirty = true;
+		}
+		else if (type == SessionProtocol::MT_LOBBY_READY) {
+			int side = -1;
+			for (int i = 0; i < 2; i++) {
+				if (clients.size() > i && clients.at(i).conn == conn) {
+					side = i;
+					break;
+				}
+			}
+			if (side == -1) {
+				spdlog::info("Server: sender {} tried to ready, but is not playing", conn);
+				continue;
+			}
+
+			SessionProtocol::LobbyReady request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize ReportResultsRequest");
+				continue;
+			}
+			_matchData.readyMessageNum[side] = pIncomingMsg->GetMessageNumber();
+			_dataDirty = true;
+		}
+		else if (type == SessionProtocol::MT_LOBBY_REPORTRESULTS) {
+			SessionProtocol::LobbyReportResults request;
 			try {
 				msg.get_to(request);
 			}
@@ -176,7 +241,7 @@ int SessionServer::Step()
 			HandleResults(request.loserSide);
 			_dataDirty = true;
 		}
-		else if (type == SessionProtocol::MT_SNAPSHOT) {
+		else if (type == SessionProtocol::MT_BATTLE_SNAPSHOT) {
 			// Forward the snapshot to every other client.
 			for (auto clientIter = clients.begin(); clientIter != clients.end(); clientIter++) {
 				if (clientIter->conn != conn) {
@@ -203,7 +268,7 @@ int SessionServer::Step()
 	// peformance gains, but ensuring low-copy with it is annoyingly difficult.
 	if (_dataDirty) {
 		json dataUpdateMsg;
-		dataUpdateMsg["type"] = SessionProtocol::MT_DATA_UPDATE;
+		dataUpdateMsg["type"] = SessionProtocol::MT_SESSION_DATAUPDATE;
 		dataUpdateMsg["lobbyData"] = clients;
 		dataUpdateMsg["matchData"] = _matchData;
 		std::string buf = dataUpdateMsg.dump();

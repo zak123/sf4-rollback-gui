@@ -35,27 +35,33 @@ namespace sf4e {
 		};
 
 		enum MessageType {
-			// Server-sent messages.
-			MT_DATA_UPDATE,
-			MT_JOIN_REJ,
+			MT_SESSION_DATAUPDATE,
+			MT_SESSION_JOINREQ,
+			MT_SESSION_JOINREJ,
 
-			// Client-sent messages.
-			MT_JOIN_REQ,
-			MT_SET_CONDITIONS,
-			MT_REPORT_RESULTS,
+			MT_LOBBY_READY,
+			MT_LOBBY_REPORTRESULTS,
 
-			// Sent by both.
-			MT_SNAPSHOT
+			MT_PREBATTLE_SETENV,
+			MT_PREBATTLE_SETCHARA,
+			MT_PREBATTLE_SETSTAGE,
+
+			MT_BATTLE_SNAPSHOT,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(MessageType, {
-			{MT_DATA_UPDATE, "data_update"},
-			{MT_JOIN_REJ, "join_rej"},
+			{MT_SESSION_DATAUPDATE, "data_update"},
+			{MT_SESSION_JOINREJ, "join_rej"},
+			{MT_SESSION_JOINREQ, "join_req"},
 
-			{MT_JOIN_REQ, "join_req"},
-			{MT_SET_CONDITIONS, "set_conditions_req"},
-			{MT_REPORT_RESULTS, "report_results"},
-			{MT_SNAPSHOT, "snapshot"},
+			{MT_LOBBY_READY, "lobby_ready"},
+			{MT_LOBBY_REPORTRESULTS, "lobby_reportresults"},
+
+			{MT_PREBATTLE_SETENV, "prebattle_setenv"},
+			{MT_PREBATTLE_SETCHARA, "prebattle_setchara"},
+			{MT_PREBATTLE_SETSTAGE, "prebattle_setstage"},
+
+			{MT_BATTLE_SNAPSHOT, "battle_snapshot"},
 		})
 
 		enum JoinResult {
@@ -74,34 +80,46 @@ namespace sf4e {
 			{JR_HASH_INVALID, "hash_invalid"}
 		})
 
-		struct DataUpdate {
-			MessageType type = MT_DATA_UPDATE;
+		struct SessionDataUpdate {
+			MessageType type = MT_SESSION_DATAUPDATE;
 			LobbyData lobbyData;
 			MatchData matchData;
 		};
 
-		struct JoinReject {
-			MessageType type = MT_JOIN_REJ;
+		struct SessionJoinReject {
+			MessageType type = MT_SESSION_JOINREJ;
 			JoinResult result;
 		};
 
-		struct JoinRequest {
-			MessageType type = MT_JOIN_REQ;
+		struct SessionJoinRequest {
+			MessageType type = MT_SESSION_JOINREQ;
 			std::string sidecarHash;
 			std::string username;
 			uint16_t port;
 		};
 
-		struct SetConditionsRequest {
-			MessageType type = MT_SET_CONDITIONS;
-			Dimps::GameEvents::VsMode::ConfirmedCharaConditions chara;
-			int32_t stageID;
+		struct LobbyReady {
+			MessageType type = MT_LOBBY_READY;
+		};
+
+		struct LobbyReportResults {
+			MessageType type = MT_LOBBY_REPORTRESULTS;
+			int32_t loserSide;
+		};
+
+		struct PreBattleSetEnv {
+			MessageType type = MT_PREBATTLE_SETENV;
 			uint32_t rngSeed;
 		};
 
-		struct ReportResultsRequest {
-			MessageType type = MT_REPORT_RESULTS;
-			int32_t loserSide;
+		struct PreBattleSetChara {
+			MessageType type = MT_PREBATTLE_SETCHARA;
+			Dimps::GameEvents::VsMode::ConfirmedCharaConditions chara;
+		};
+
+		struct PreBattleSetStage {
+			MessageType type = MT_PREBATTLE_SETSTAGE;
+			int32_t stageID;
 		};
 
 		struct StateSnapshot {
@@ -129,20 +147,27 @@ namespace sf4e {
 			CharaStateSnapshot chara[2];
 		};
 
-		struct SnapshotMsg {
-			MessageType type = MT_SNAPSHOT;
+		struct BattleSnapshot {
+			MessageType type = MT_BATTLE_SNAPSHOT;
 			StateSnapshot snapshot;
 		};
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MemberData, name, ip, port);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(DataUpdate, type, lobbyData, matchData);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(JoinReject, type, result);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(JoinRequest, type, sidecarHash, username, port);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SetConditionsRequest, type, chara, stageID, rngSeed);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ReportResultsRequest, type, loserSide);
+
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionDataUpdate, type, lobbyData, matchData);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinReject, type, result);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinRequest, type, sidecarHash, username, port);
+
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyReady, type);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyReportResults, type, loserSide);
+
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PreBattleSetChara, type, chara);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PreBattleSetEnv, type, rngSeed);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PreBattleSetStage, type, stageID);
+
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(StateSnapshot::CharaStateSnapshot, status, rootPos, side, vit, vitmax, revenge, revengemax, recoverable, recoverablemax, super, supermax, sctimeamt, sctimemax, uctime, uctimemax, damage, combodamage);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(StateSnapshot, frameIdx, chara);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SnapshotMsg, type, snapshot);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleSnapshot, type, snapshot);
 	}
 }

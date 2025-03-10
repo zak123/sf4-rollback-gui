@@ -36,6 +36,7 @@ using fSystem = sf4e::Game::Battle::System;
 using fVsBattle = sf4e::GameEvents::VsBattle;
 using fVsPreBattle = sf4e::GameEvents::VsPreBattle;
 using sf4e::SessionClient;
+using sf4e::SessionProtocol::LobbyReady;
 
 const int sf4e::SESSION_CLIENT_MAX_MESSAGES_PER_POLL = 20;
 SessionClient* SessionClient::s_pCallbackInstance;
@@ -174,8 +175,8 @@ int SessionClient::Step()
 			continue;
 		}
 
-		if (type == SessionProtocol::MT_JOIN_REJ) {
-			SessionProtocol::JoinReject reject;
+		if (type == SessionProtocol::MT_SESSION_JOINREJ) {
+			SessionProtocol::SessionJoinReject reject;
 			try {
 				msg.get_to(reject);
 			}
@@ -207,8 +208,8 @@ int SessionClient::Step()
 			_conn = k_HSteamNetConnection_Invalid;
 			return -1;
 		}
-		else if (type == SessionProtocol::MT_DATA_UPDATE) {
-			SessionProtocol::DataUpdate update;
+		else if (type == SessionProtocol::MT_SESSION_DATAUPDATE) {
+			SessionProtocol::SessionDataUpdate update;
 			try {
 				msg.get_to(update);
 			}
@@ -254,8 +255,8 @@ int SessionClient::Step()
 
 			}
 		}
-		else if (type == SessionProtocol::MT_SNAPSHOT) {
-			SessionProtocol::SnapshotMsg m;
+		else if (type == SessionProtocol::MT_BATTLE_SNAPSHOT) {
+			SessionProtocol::BattleSnapshot m;
 			try {
 				msg.get_to(m);
 			}
@@ -306,7 +307,7 @@ int SessionClient::Step()
 			if (!localSnapshotIter->second.second.sent) {
 				// Snapshot not yet sent. Send it.
 				localSnapshotIter->second.second.sent = true;
-				SessionProtocol::SnapshotMsg m;
+				SessionProtocol::BattleSnapshot m;
 				m.snapshot = localSnapshotIter->second.first;
 				json msg = m;
 				if (Send(msg, nullptr) != k_EResultOK) {
@@ -493,7 +494,7 @@ void SessionClient::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusCh
 	{
 		spdlog::info("Client connected to server OK, attempting to join...");
 		_connected = true;
-		SessionProtocol::JoinRequest request;
+		SessionProtocol::SessionJoinRequest request;
 		request.sidecarHash = _sidecarHash;
 		request.username = _name;
 		request.port = _ggpoPort;
@@ -516,22 +517,61 @@ EResult SessionClient::Send(nlohmann::json& msg, int64_t* outMessageNum) {
 	);
 }
 
-EResult SessionClient::SetMatchConditions(SessionProtocol::SetConditionsRequest& r)
+EResult SessionClient::Lobby_Ready()
 {
-	json msg = r;
-	EResult result = Send(msg, &_outstandingReadyRequestNumber);
+	LobbyReady msg;
+	json j = msg;
+	EResult result = Send(j, &_outstandingReadyRequestNumber);
 	if (result != k_EResultOK) {
-		spdlog::warn("Client: could not send match conditions! Result: {}", (int)result);
+		spdlog::warn("Client: could not send ready! Result: {}", (int)result);
 	}
 	return result;
 }
 
-EResult SessionClient::ReportResults(SessionProtocol::ReportResultsRequest& r)
+EResult SessionClient::Lobby_ReportResults(int loserSide)
 {
+	SessionProtocol::LobbyReportResults r;
+	r.loserSide = loserSide;
 	json msg = r;
 	EResult result = Send(msg, nullptr);
 	if (result != k_EResultOK) {
 		spdlog::warn("Client: could not report results! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::PreBattle_SetEnv(uint32_t rngSeed)
+{
+	SessionProtocol::PreBattleSetEnv msg;
+	msg.rngSeed = rngSeed;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not set prebattle environment! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::PreBattle_SetChara(const Dimps::GameEvents::VsMode::ConfirmedCharaConditions& chara)
+{
+	SessionProtocol::PreBattleSetChara msg;
+	msg.chara = chara;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not set prebattle character! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::PreBattle_SetStage(int32_t stageID)
+{
+	SessionProtocol::PreBattleSetStage msg;
+	msg.stageID = stageID;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not set prebattle stage! Result: {}", (int)result);
 	}
 	return result;
 }

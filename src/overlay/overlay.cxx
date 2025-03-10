@@ -1048,21 +1048,26 @@ void DrawNetworkLobbyPanel() {
 				ImGui::Combo("Stage", &stageID, Dimps::stageNames, 30);
 			}
 			if (Button("Send chara")) {
-				sf4e::SessionProtocol::SetConditionsRequest r;
-				r.chara = myConditions;
-				r.rngSeed = sf4e::localRand();
-				r.stageID = stageID;
-				if (fUserApp::client->SetMatchConditions(r) != k_EResultOK) {
-					MessageBoxA(NULL, "Could not send match conditions!", NULL, MB_OK);
+				if (fUserApp::client->PreBattle_SetChara(myConditions) != k_EResultOK) {
+					MessageBoxA(NULL, "Could not send chara conditions!", NULL, MB_OK);
 				}
+
+				if (isSelfActiveSide == 0) {
+					if (fUserApp::client->PreBattle_SetEnv(sf4e::localRand()) != k_EResultOK) {
+						MessageBoxA(NULL, "Could not send environment!", NULL, MB_OK);
+					}
+					if (fUserApp::client->PreBattle_SetStage(stageID) != k_EResultOK) {
+						MessageBoxA(NULL, "Could not send stage!", NULL, MB_OK);
+					}
+				}
+
+				fUserApp::client->Lobby_Ready();
 			}
 		}
 
 		if (Button("Report win")) {
 			int loser = (isSelfActiveSide == 0) ? 1 : 0;
-			sf4e::SessionProtocol::ReportResultsRequest r;
-			r.loserSide = loser;
-			if (fUserApp::client->ReportResults(r) != k_EResultOK) {
+			if (fUserApp::client->Lobby_ReportResults(loser) != k_EResultOK) {
 				MessageBoxA(NULL, "Could not report results!", NULL, MB_OK);
 			}
 		}
