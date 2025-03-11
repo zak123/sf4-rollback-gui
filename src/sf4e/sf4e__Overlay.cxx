@@ -1,5 +1,3 @@
-#include "overlay.h"
-
 #include <algorithm>
 #include <memory>
 #include <random>
@@ -35,16 +33,17 @@
 #include "../session/sf4e__SessionClient.hxx"
 #include "../session/sf4e__SessionProtocol.hxx"
 
-#include "../sf4e/sf4e.hxx"
-#include "../sf4e/sf4e__Event.hxx"
-#include "../sf4e/sf4e__Game.hxx"
-#include "../sf4e/sf4e__Game__Battle.hxx"
-#include "../sf4e/sf4e__Game__Battle__Hud.hxx"
-#include "../sf4e/sf4e__Game__Battle__System.hxx"
-#include "../sf4e/sf4e__Game__Battle__Vfx.hxx"
-#include "../sf4e/sf4e__GameEvents.hxx"
-#include "../sf4e/sf4e__Pad.hxx"
-#include "../sf4e/sf4e__UserApp.hxx"
+#include "sf4e.hxx"
+#include "sf4e__Event.hxx"
+#include "sf4e__Game.hxx"
+#include "sf4e__Game__Battle.hxx"
+#include "sf4e__Game__Battle__Hud.hxx"
+#include "sf4e__Game__Battle__System.hxx"
+#include "sf4e__Game__Battle__Vfx.hxx"
+#include "sf4e__GameEvents.hxx"
+#include "sf4e__Overlay.hxx"
+#include "sf4e__Pad.hxx"
+#include "sf4e__UserApp.hxx"
 
 
 #define DEFAULT_ALPHA 0.87f
@@ -55,6 +54,7 @@ namespace rStageSelect = Dimps::GameEvents::StageSelect;
 namespace rHud = Dimps::Game::Battle::Hud;
 namespace rPad = Dimps::Pad;
 namespace fHud = sf4e::Game::Battle::Hud;
+namespace Overlay = sf4e::Overlay;
 
 using CameraUnit = Dimps::Game::Battle::Camera::Unit;
 using CharaActor = Dimps::Game::Battle::Chara::Actor;
@@ -2038,7 +2038,7 @@ int OnMainMenuModeSelected(int mode) {
 	return 0;
 }
 
-void InitializeOverlay(HWND hWnd, IDirect3DDevice9* lpDevice) {
+void Overlay::InitializeOverlay(HWND hWnd, IDirect3DDevice9* lpDevice) {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
@@ -2050,7 +2050,7 @@ void InitializeOverlay(HWND hWnd, IDirect3DDevice9* lpDevice) {
 	fMainMenu::OnModeSelectedOverride = OnMainMenuModeSelected;
 }
 
-void DrawOverlay() {
+void Overlay::DrawOverlay() {
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	NewFrame();
@@ -2252,12 +2252,12 @@ void DrawOverlay() {
 	ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
 }
 
-void FreeOverlay() {
+void Overlay::FreeOverlay() {
 	ImGui_ImplDX9_Shutdown();
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
 }
 
-LRESULT WINAPI OverlayWindowFunc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+LRESULT WINAPI Overlay::OverlayWindowFunc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	return ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
 }

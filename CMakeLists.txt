@@ -87,6 +87,8 @@ add_library(sf4e STATIC
     "src/sf4e/sf4e__Game__Battle__Vfx.cxx"
     "src/sf4e/sf4e__GameEvents.hxx"
     "src/sf4e/sf4e__GameEvents.cxx"
+    "src/sf4e/sf4e__Overlay.hxx"
+    "src/sf4e/sf4e__Overlay.cxx"
     "src/sf4e/sf4e__Pad.hxx"
     "src/sf4e/sf4e__Pad.cxx"
     "src/sf4e/sf4e__Platform.hxx"
@@ -96,8 +98,8 @@ add_library(sf4e STATIC
 )
 target_link_libraries(
     sf4e
-    PRIVATE ${LIB_DETOURS} Session "Kernel32" "ws2_32" "Mswsock" "AdvApi32" "Shlwapi" "Bcrypt"
-    PUBLIC nlohmann_json::nlohmann_json spdlog::spdlog GameNetworkingSockets::shared ggpo::GGPO
+    PRIVATE ${LIB_DETOURS} Session "Kernel32" "ws2_32" "Mswsock" "AdvApi32" "Shlwapi" "Bcrypt" "Xinput9_1_0"
+    PUBLIC imgui::imgui nlohmann_json::nlohmann_json spdlog::spdlog GameNetworkingSockets::shared ggpo::GGPO
 )
 
 add_library(Session STATIC
@@ -122,12 +124,9 @@ add_executable(Launcher WIN32 src/launcher/launcher.cxx)
 target_include_directories(Launcher PRIVATE ${VALVEFILEVDF_INCLUDE_DIRS})
 target_link_libraries(Launcher PRIVATE ${LIB_DETOURS} CLI11::CLI11 spdlog::spdlog "shlwapi" "pathcch")
 
-add_library(Overlay STATIC src/overlay/overlay.cxx src/overlay/overlay.h)
-target_link_libraries(Overlay PRIVATE "Xinput9_1_0" imgui::imgui ggpo::GGPO spdlog::spdlog Dimps sf4e Session)
-
 add_library(Sidecar SHARED src/sidecar/sidecar.cxx)
 target_include_directories(Sidecar PRIVATE ${VALVEFILEVDF_INCLUDE_DIRS})
-target_link_libraries(Sidecar PRIVATE ${LIB_DETOURS} Dimps sf4e Overlay)
+target_link_libraries(Sidecar PRIVATE ${LIB_DETOURS} Dimps sf4e)
 
 target_compile_definitions(Launcher PRIVATE -D_UNICODE -DUNICODE)
 

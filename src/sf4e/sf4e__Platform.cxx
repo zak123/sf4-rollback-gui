@@ -20,7 +20,7 @@
 #include "sf4e.hxx"
 #include "sf4e__Platform.hxx"
 #include "sf4e__UserApp.hxx"
-#include "../overlay/overlay.h"
+#include "sf4e__Overlay.hxx"
 
 namespace rPlatform = Dimps::Platform;
 using rD3D = rPlatform::D3D;
@@ -59,18 +59,18 @@ void fD3D::Install() {
 
 void WINAPI fD3D::RunD3DOperations(void* data) {
     rD3D::staticMethods.RunD3DOperations(data);
-    DrawOverlay();
+    Overlay::DrawOverlay();
 }
 
 void fD3D::Destroy() {
-    FreeOverlay();
+    Overlay::FreeOverlay();
     (this->*rD3D::privateMethods.Destroy)();
 }
 
 DWORD fD3D::Reset() {
-    FreeOverlay();
+    Overlay::FreeOverlay();
     DWORD out = (this->*rD3D::privateMethods.Reset)();
-    InitializeOverlay(
+    Overlay::InitializeOverlay(
         (*rMain::GetWindowData(rMain::staticMethods.GetSingleton()))->hWnd,
         Dimps::Platform::D3D::staticMethods.GetSingleton()->lpD3DDevice
     );
@@ -161,7 +161,7 @@ int fMain::Initialize(void* a, void* b, void* c) {
     }
     CoTaskMemFree(path);
 
-    InitializeOverlay(
+    Overlay::InitializeOverlay(
         (*rMain::GetWindowData(rMain::staticMethods.GetSingleton()))->hWnd,
         Dimps::Platform::D3D::staticMethods.GetSingleton()->lpD3DDevice
     );
@@ -187,7 +187,7 @@ void fMain::Destroy() {
 }
 
 void WINAPI fMain::RunWindowFunc(rMain* lpMain, HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    if (OverlayWindowFunc(hwnd, uMsg, wParam, lParam)) {
+    if (Overlay::OverlayWindowFunc(hwnd, uMsg, wParam, lParam)) {
         return;
     }
     rMain::staticMethods.RunWindowFunc(lpMain, hwnd, uMsg, wParam, lParam);
