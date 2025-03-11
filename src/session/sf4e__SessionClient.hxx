@@ -38,9 +38,9 @@ namespace sf4e {
 		);
 		~SessionClient();
 
-
 		int Connect(HSteamNetConnection newConn);
 		int Connect(const SteamNetworkingIPAddr& serverAddr);
+		void Disconnect();
 		int Step();
 		void PrepareForCallbacks();
 

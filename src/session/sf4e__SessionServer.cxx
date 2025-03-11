@@ -47,8 +47,29 @@ SessionServer::~SessionServer()
 	}
 }
 
-
 void SessionServer::AddConnection(HSteamNetConnection newConn) {
+	// XXX (adanducci): It is absolutely critical to note that
+	// `SetConfigValue`'s interface to set callbacks is _not_ the
+	// same as the one used by `CreateListenSocketIP`/`SteamNetworkingConfigValue_t`.
+	// 
+	// Per the documentation for `SetConfigValue` and the header comment @
+	// https://github.com/ValveSoftware/GameNetworkingSockets/blob/62b395172f157ca4f01eea3387d1131400f8d604/include/steam/isteamnetworkingutils.h#L296-L307 :
+	//
+	// NOTE: When setting pointers (e.g. callback functions), do not pass the function pointer
+	// directly. Your argument should be a pointer to a function pointer.
+	//
+	// `CreateListenSocketIP`/`SteamNetworkingConfigValue_t` just takes the
+	// function pointer directly. The failure mode if you pass the function
+	// pointer directly is _extremely_ confusing- it just appears to be
+	// a segfault in the GNS callback loop.
+	void* callback = SteamNetConnectionStatusChangedCallback;
+	SteamNetworkingUtils()->SetConfigValue(
+		k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
+		k_ESteamNetworkingConfig_Connection,
+		newConn,
+		k_ESteamNetworkingConfig_Ptr,
+		&callback
+	);
 	_interface->SetConnectionPollGroup(newConn, _pollGroup);
 }
 
@@ -165,7 +186,7 @@ int SessionServer::Step()
 				}
 			}
 			if (side != 0) {
-				spdlog::info("Server: sender {} tried to set env, but is not playing", conn);
+				spdlog::info("Server: sender {} tried to set env, but is not P1", conn);
 				continue;
 			}
 			SessionProtocol::PreBattleSetEnv request;
@@ -189,7 +210,7 @@ int SessionServer::Step()
 				}
 			}
 			if (side != 0) {
-				spdlog::info("Server: sender {} tried to set stage, but is not playing", conn);
+				spdlog::info("Server: sender {} tried to set stage, but is not P1", conn);
 				continue;
 			}
 			SessionProtocol::PreBattleSetStage request;
@@ -381,7 +402,7 @@ void SessionServer::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusCh
 			break;
 		}
 
-		AddConnection(pInfo->m_hConn);
+		_interface->SetConnectionPollGroup(pInfo->m_hConn, _pollGroup);
 	}
 
 	default:

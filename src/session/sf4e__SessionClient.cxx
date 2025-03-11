@@ -101,13 +101,17 @@ int SessionClient::Connect(const SteamNetworkingIPAddr& serverAddr) {
 	return 0;
 }
 
-SessionClient::~SessionClient()
-{
+void SessionClient::Disconnect() {
 	if (_conn != k_HSteamNetConnection_Invalid) {
 		_interface->CloseConnection(_conn, k_ESteamNetConnectionEnd_App_Generic, nullptr, true);
 		_conn = k_HSteamNetConnection_Invalid;
 		_connected = false;
 	}
+}
+
+SessionClient::~SessionClient()
+{
+	Disconnect();
 	_interface = nullptr;
 }
 

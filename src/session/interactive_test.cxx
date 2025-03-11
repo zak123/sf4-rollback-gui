@@ -47,79 +47,6 @@ static char* characterNames[] = {
 };
 #define NUM_STUB_CHARAS 3
 
-struct TestingSessionClient {
-    SessionClient::Callbacks callbacks;
-    std::deque<std::string> alerts;
-    SessionClient c;
-    int menuCharaID;
-    PreBattleSetChara charaMsg;
-    PreBattleSetEnv envMsg;
-    PreBattleSetStage stageMsg;
-    LobbyReportResults reportResultsReqBuf;
-
-    TestingSessionClient(
-        std::string sidecarHash,
-        uint16_t ggpoPort,
-        std::string& name
-    ) : 
-        callbacks{ this, OnError, OnReady },
-        c(
-            callbacks,
-            sidecarHash,
-            ggpoPort,
-            name
-        ), menuCharaID(0)
-    {
-        envMsg.rngSeed = 0;
-        stageMsg.stageID = 0;
-        charaMsg.chara.charaID = 0;
-        charaMsg.chara.costume = 0;
-        charaMsg.chara.color = 0;
-        charaMsg.chara._unused = 0;
-        charaMsg.chara.personalAction = 0;
-        charaMsg.chara.winQuote = 0;
-        charaMsg.chara.ultraCombo = 0;
-        charaMsg.chara.handicap = 0;
-        charaMsg.chara.unc_edition = 0;
-        reportResultsReqBuf.loserSide = 0;
-    }
-
-    static void OnError(SessionClient::ErrorType errType, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
-        TestingSessionClient* client = (TestingSessionClient*)callbacks.data;
-        switch (errType) {
-        case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_HASH_INVALID:
-            client->alerts.push_back("Could not join lobby: version mismatch");
-            break;
-        case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_LOBBY_FULL:
-            client->alerts.push_back("Could not join lobby: lobby fill");
-            break;
-        case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_NAME_TAKEN:
-            client->alerts.push_back("Could not join lobby: name taken");
-            break;
-        case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_REQUEST_INVALID:
-            client->alerts.push_back("Could not join lobby: join request incorrectly formatted- version mismatch?");
-            break;
-        default:
-            client->alerts.push_back("Unknown error occurred");
-            break;
-        }
-    }
-
-    static void OnReady(SessionClient* const c, const SessionClient::Callbacks& callbacks) {
-        TestingSessionClient* client = (TestingSessionClient*)callbacks.data;
-        client->alerts.push_back("Ready!");
-    }
-};
-
-static std::unique_ptr<SessionServer> g_server;
-static std::deque<TestingSessionClient> g_clients;
-
-// Forward declarations of helper functions
-bool CreateDeviceD3D(HWND hWnd);
-void CleanupDeviceD3D();
-void ResetDevice();
-LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
 void DrawCharaConditionText(const MatchData& matchData, int i) {
     Text(
         "Chara %d: id %d, color %d, costume %d, handicap %d, PA %d, UC %d, edition %d, win quote %d",
@@ -135,35 +62,179 @@ void DrawCharaConditionText(const MatchData& matchData, int i) {
     );
 }
 
-void DrawClientSessionInfo(const LobbyData& lobbyData, const MatchData& matchData) {
-    Text("RNG seed: %d", matchData.rngSeed);
-    Text("Stage ID: %d", matchData.stageID);
-    for (int i = 0; i < 2; i++) {
-        DrawCharaConditionText(matchData, i);
+struct AppInstance {
+    bool running;
+    SessionClient::Callbacks callbacks;
+    std::deque<std::string> alerts;
+    SessionClient c;
+    int menuCharaID;
+    PreBattleSetChara charaMsg;
+    PreBattleSetEnv envMsg;
+    PreBattleSetStage stageMsg;
+    LobbyReportResults reportResultsReqBuf;
+
+    AppInstance(
+        std::string sidecarHash,
+        uint16_t ggpoPort,
+        std::string& name
+    ) : 
+        callbacks{ this, OnError, OnReady },
+        c(
+            callbacks,
+            sidecarHash,
+            ggpoPort,
+            name
+        ),
+        menuCharaID(0),
+        running(true)
+    {
+        envMsg.rngSeed = 0;
+        stageMsg.stageID = 0;
+        charaMsg.chara.charaID = 0;
+        charaMsg.chara.costume = 0;
+        charaMsg.chara.color = 0;
+        charaMsg.chara._unused = 0;
+        charaMsg.chara.personalAction = 0;
+        charaMsg.chara.winQuote = 0;
+        charaMsg.chara.ultraCombo = 0;
+        charaMsg.chara.handicap = 0;
+        charaMsg.chara.unc_edition = 0;
+        reportResultsReqBuf.loserSide = 0;
     }
 
-    for (int i = 0; i < 2 && i < lobbyData.size(); i++) {
-        const char* label = i == 0 ? "P1" : "P2";
-        Text(
-            "%s: %s (%s)",
-            label,
-            lobbyData[i].name.c_str(),
-            matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
-        );
+    void Update() {
+        c.Step();
     }
-    Separator();
-    Text("Queue:");
-    if (lobbyData.size() > 2) {
-        for (int i = 2; i < lobbyData.size(); i++) {
-            Text(lobbyData[i].name.c_str());
+
+    void DrawSetConditionsForm() {
+        static const int stepSize = 1;
+
+        ImGui::InputScalar("RNG seed", ImGuiDataType_U32, &envMsg.rngSeed);
+        ImGui::InputInt("Stage ID", &stageMsg.stageID);
+        ImGui::Combo("Chara", &menuCharaID, characterNames, NUM_STUB_CHARAS);
+        charaMsg.chara.charaID = menuCharaID;
+        ImGui::InputScalar("Color", ImGuiDataType_U8, &charaMsg.chara.color, &stepSize);
+        ImGui::InputScalar("Costume", ImGuiDataType_U8, &charaMsg.chara.costume, &stepSize);
+        ImGui::InputScalar("Handicap", ImGuiDataType_U8, &charaMsg.chara.handicap, &stepSize);
+        ImGui::InputScalar("Personal action", ImGuiDataType_U8, &charaMsg.chara.personalAction, &stepSize);
+        ImGui::InputScalar("Ultra Combo", ImGuiDataType_U8, &charaMsg.chara.ultraCombo, &stepSize);
+        ImGui::InputScalar("Edition", ImGuiDataType_U8, &charaMsg.chara.unc_edition, &stepSize);
+        ImGui::InputScalar("Win quote", ImGuiDataType_U8, &charaMsg.chara.winQuote, &stepSize);
+
+        if (Button("Send set conditions")) {
+            c.PreBattle_SetChara(charaMsg.chara);
+            c.PreBattle_SetEnv(envMsg.rngSeed);
+            c.PreBattle_SetStage(stageMsg.stageID);
+            c.Lobby_Ready();
         }
     }
-    else {
-        Text("(No one in queue)");
+
+
+    void DrawResultsForm() {
+        ImGui::InputInt("Loser side", &reportResultsReqBuf.loserSide);
+
+        if (Button("Send results")) {
+            c.Lobby_ReportResults(reportResultsReqBuf.loserSide);
+        }
     }
 
-    Separator();
-}
+    void Draw() {
+        if (alerts.size() > 0) {
+            ImU32 red = IM_COL32(255, 0, 0, 255);
+            ImU32 darkRed = IM_COL32(255, 0, 0, 102);
+            ImGui::PushStyleColor(ImGuiCol_Button, darkRed);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, red);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, red);
+            ImGui::PushStyleColor(ImGuiCol_Text, red);
+            Text(alerts.at(0).c_str());
+            if (Button("OK")) {
+                alerts.pop_front();
+            }
+            ImGui::PopStyleColor(4);
+        }
+        else {
+            if (Button("Send join")) {
+                SessionJoinRequest request;
+                request.sidecarHash = c._sidecarHash;
+                request.username = c._name;
+                request.port = c._ggpoPort;
+                nlohmann::json msg = request;
+                if (this->c.Send(msg, nullptr) != k_EResultOK) {
+                    spdlog::warn("Client could send initial join request");
+                }
+            }
+
+            Text("RNG seed: %d", c._matchData.rngSeed);
+            Text("Stage ID: %d", c._matchData.stageID);
+            for (int i = 0; i < 2; i++) {
+                DrawCharaConditionText(c._matchData, i);
+            }
+
+            for (int i = 0; i < 2 && i < c._lobbyData.size(); i++) {
+                const char* label = i == 0 ? "P1" : "P2";
+                Text(
+                    "%s: %s (%s)",
+                    label,
+                    c._lobbyData[i].name.c_str(),
+                    c._matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
+                );
+            }
+            Separator();
+            Text("Queue:");
+            if (c._lobbyData.size() > 2) {
+                for (int i = 2; i < c._lobbyData.size(); i++) {
+                    Text(c._lobbyData[i].name.c_str());
+                }
+            }
+            else {
+                Text("(No one in queue)");
+            }
+            Separator();
+            DrawSetConditionsForm();
+            Separator();
+            DrawResultsForm();
+            Separator();
+            if (Button("Disconnect")) {
+                c.Disconnect();
+            }
+        }
+    }
+
+    static void OnError(SessionClient::ErrorType errType, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+        AppInstance* app = (AppInstance*)callbacks.data;
+        switch (errType) {
+        case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_HASH_INVALID:
+            app->alerts.push_back("Could not join lobby: version mismatch");
+            break;
+        case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_LOBBY_FULL:
+            app->alerts.push_back("Could not join lobby: lobby fill");
+            break;
+        case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_NAME_TAKEN:
+            app->alerts.push_back("Could not join lobby: name taken");
+            break;
+        case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_REQUEST_INVALID:
+            app->alerts.push_back("Could not join lobby: join request incorrectly formatted- version mismatch?");
+            break;
+        default:
+            app->alerts.push_back("Unknown error occurred");
+            break;
+        }
+    }
+
+    static void OnReady(SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+        AppInstance* app = (AppInstance*)callbacks.data;
+        app->alerts.push_back("Ready!");
+    }
+};
+
+static std::unique_ptr<SessionServer> g_server;
+static std::deque<AppInstance> g_instances;
+
+// Forward declarations of helper functions
+bool CreateDeviceD3D(HWND hWnd);
+void CleanupDeviceD3D();
+void ResetDevice();
+LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 void DrawServerSessionInfo(const std::vector<SessionServer::SessionMember>& clients, const MatchData& matchData) {
     Text("RNG seed: %d", matchData.rngSeed);
@@ -191,43 +262,6 @@ void DrawServerSessionInfo(const std::vector<SessionServer::SessionMember>& clie
     else {
         Text("(No one in queue)");
     }
-
-    Separator();
-}
-
-int DrawSetConditionsForm(TestingSessionClient& client) {
-    static const int stepSize = 1;
-
-    ImGui::InputScalar("RNG seed", ImGuiDataType_U32, &client.envMsg.rngSeed);
-    ImGui::InputInt("Stage ID", &client.stageMsg.stageID);
-    ImGui::Combo("Chara", &client.menuCharaID, characterNames, NUM_STUB_CHARAS);
-    client.charaMsg.chara.charaID = client.menuCharaID;
-    ImGui::InputScalar("Color", ImGuiDataType_U8, &client.charaMsg.chara.color, &stepSize);
-    ImGui::InputScalar("Costume", ImGuiDataType_U8, &client.charaMsg.chara.costume, &stepSize);
-    ImGui::InputScalar("Handicap", ImGuiDataType_U8, &client.charaMsg.chara.handicap, &stepSize);
-    ImGui::InputScalar("Personal action", ImGuiDataType_U8, &client.charaMsg.chara.personalAction, &stepSize);
-    ImGui::InputScalar("Ultra Combo", ImGuiDataType_U8, &client.charaMsg.chara.ultraCombo, &stepSize);
-    ImGui::InputScalar("Edition", ImGuiDataType_U8, &client.charaMsg.chara.unc_edition, &stepSize);
-    ImGui::InputScalar("Win quote", ImGuiDataType_U8, &client.charaMsg.chara.winQuote, &stepSize);
-
-    if (Button("Send set conditions")) {
-        client.c.PreBattle_SetChara(client.charaMsg.chara);
-        client.c.PreBattle_SetEnv(client.envMsg.rngSeed);
-        client.c.PreBattle_SetStage(client.stageMsg.stageID);
-        client.c.Lobby_Ready();
-    }
-
-    return k_EResultNone;
-}
-
-int DrawResultsForm(TestingSessionClient& client) {
-    ImGui::InputInt("Loser side", &client.reportResultsReqBuf.loserSide);
-
-    if (Button("Send results")) {
-        return client.c.Lobby_ReportResults(client.reportResultsReqBuf.loserSide);
-    }
-
-    return k_EResultNone;
 }
 
 int DrawServerWindow() {
@@ -252,12 +286,12 @@ int DrawServerWindow() {
 
             SteamNetworkingSockets()->CreateSocketPair(&pOutConnection1, &pOutConnection2, false, nullptr, nullptr);
             g_server->AddConnection(pOutConnection1);
-            g_clients.emplace_back(
+            g_instances.emplace_back(
                 std::string(nextClientHash),
                 nNextGgpoPort,
                 std::string(szNewClientName)
             );
-            g_clients.back().c.Connect(pOutConnection2);
+            g_instances.back().c.Connect(pOutConnection2);
             nNextClientID++;
             nNextGgpoPort++;
         }
@@ -270,48 +304,16 @@ int DrawServerWindow() {
     return 0;
 }
 
-int DrawClientWindow(int idx, TestingSessionClient& client) {
+int DrawAppInstanceWindow(int idx, AppInstance& app) {
     char label[64];
-    sprintf_s(label, "Client %d (%s)", idx, client.c._name.c_str());
+    sprintf_s(label, "Client %d (%s)", idx, app.c._name.c_str());
     Begin(
         label,
-        nullptr,
+        &app.running,
         ImGuiWindowFlags_None
     );
-    Text("Client window for %d: %s", idx, client.c._name.c_str());
-
-    if (client.alerts.size() > 0) {
-        ImU32 red = IM_COL32(255, 0, 0, 255);
-        ImU32 darkRed = IM_COL32(255, 0, 0, 102);
-        ImGui::PushStyleColor(ImGuiCol_Button, darkRed);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, red);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, red);
-        ImGui::PushStyleColor(ImGuiCol_Text, red);
-        Text(client.alerts.at(0).c_str());
-        if (Button("OK")) {
-            client.alerts.pop_front();
-        }
-        ImGui::PopStyleColor(4);
-    }
-    else {
-        if (Button("Send join")) {
-            SessionJoinRequest request;
-            request.sidecarHash = client.c._sidecarHash;
-            request.username = client.c._name;
-            request.port = client.c._ggpoPort;
-            nlohmann::json msg = request;
-            if (client.c.Send(msg, nullptr) != k_EResultOK) {
-                spdlog::warn("Client could send initial join request");
-            }
-        }
-
-        DrawClientSessionInfo(client.c._lobbyData, client.c._matchData);
-        Separator();
-        DrawSetConditionsForm(client);
-        Separator();
-        DrawResultsForm(client);
-    }
-
+    Text("Client window for %d: %s", idx, app.c._name.c_str());
+    app.Draw();
     End();
     return 0;
 }
@@ -369,10 +371,11 @@ int main(int, char**)
         }
         SteamNetworkingSockets()->RunCallbacks();
 
-        auto iter = g_clients.begin();
-        while (iter != g_clients.end()) {
-            if (iter->c.Step() && iter->alerts.size() == 0) {
-                iter = g_clients.erase(iter);
+        auto iter = g_instances.begin();
+        while (iter != g_instances.end()) {
+            iter->Update();
+            if (!iter->running) {
+                iter = g_instances.erase(iter);
             }
             else {
                 iter++;
@@ -431,8 +434,8 @@ int main(int, char**)
             ImGui::ShowDemoWindow(&show_demo_window);
 
         DrawServerWindow();
-        for (int i = 0; i < g_clients.size(); i++) {
-            DrawClientWindow(i, g_clients[i]);
+        for (int i = 0; i < g_instances.size(); i++) {
+            DrawAppInstanceWindow(i, g_instances[i]);
         }
 
         // Rendering
@@ -463,7 +466,7 @@ int main(int, char**)
     ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
     g_server.reset();
-    g_clients.clear();
+    g_instances.clear();
     GameNetworkingSockets_Kill();
     spdlog::shutdown();
 
