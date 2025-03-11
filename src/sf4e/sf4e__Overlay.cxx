@@ -162,13 +162,13 @@ static int mainMenuJumpCharaCount = 2;
 static int mainMenuJumpStageID = 0;
 static std::deque<std::string> clientAlerts;
 
-void OnClientError(sf4e::SessionClient::ErrorType errType, const sf4e::SessionClient::Callbacks& callbacks) {
+void Overlay::OnClientError(sf4e::SessionClient::ErrorType errType, const sf4e::SessionClient::Callbacks& callbacks) {
 	switch (errType) {
 	case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_HASH_INVALID:
 		clientAlerts.push_back("Could not join lobby: version mismatch");
 		break;
 	case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_LOBBY_FULL:
-		clientAlerts.push_back("Could not join lobby: lobby fill");
+		clientAlerts.push_back("Could not join lobby: lobby full");
 		break;
 	case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_NAME_TAKEN:
 		clientAlerts.push_back("Could not join lobby: name taken");
@@ -182,11 +182,6 @@ void OnClientError(sf4e::SessionClient::ErrorType errType, const sf4e::SessionCl
 	}
 	show_network_window = true;
 }
-
-sf4e::SessionClient::Callbacks clientCallbacks = {
-	nullptr,
-	OnClientError
-};
 
 enum NetworkWindowState {
 	NWS_CAPTURE = 0,
@@ -958,7 +953,7 @@ void DrawNetworkJoinPanel(uint8_t deviceIdx, uint8_t deviceType) {
 	ImGui::InputScalar("Delay", ImGuiDataType_U8, &delay);
 
 	if (Button("Join")) {
-		fUserApp::StartClient(clientCallbacks, joinAddr, port, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
+		fUserApp::StartClient(joinAddr, port, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
 	}
 }
 
@@ -993,7 +988,7 @@ void DrawNetworkHostPanel(uint8_t deviceIdx, uint8_t deviceType) {
 		char hostAddr[64];
 		snprintf(hostAddr, 64, "127.0.0.1:%d", hostPort);
 		fUserApp::StartServer(hostPort, sf4e::sidecarHash);
-		fUserApp::StartClient(clientCallbacks, hostAddr, ggpoPort, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
+		fUserApp::StartClient(hostAddr, ggpoPort, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
 	}
 	ImGui::EndDisabled();
 }

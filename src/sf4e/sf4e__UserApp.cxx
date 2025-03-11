@@ -15,6 +15,7 @@
 
 #include "sf4e__Game__Battle.hxx"
 #include "sf4e__Game__Battle__System.hxx"
+#include "sf4e__Overlay.hxx"
 #include "sf4e__UserApp.hxx"
 
 using rVsMode = Dimps::GameEvents::VsMode;
@@ -28,15 +29,20 @@ using sf4e::SessionServer;
 std::unique_ptr<SessionClient> fUserApp::client;
 std::unique_ptr<SessionServer> fUserApp::server;
 
+sf4e::SessionClient::Callbacks clientCallbacks = {
+    nullptr,
+    sf4e::Overlay::OnClientError
+};
+
 void fUserApp::Install() {
     DetourAttach((PVOID*)&rUserApp::staticMethods.Steam_PostUpdate, Steam_PostUpdate);
 }
 
-void fUserApp::StartClient(const SessionClient::Callbacks& callbacks, char* joinAddr, uint16_t port, std::string& sidecarHash, std::string& name, uint8_t deviceType, uint8_t deviceIdx, uint8_t delay) {
+void fUserApp::StartClient(char* joinAddr, uint16_t port, std::string& sidecarHash, std::string& name, uint8_t deviceType, uint8_t deviceIdx, uint8_t delay) {
     SteamNetworkingIPAddr addr;
     addr.Clear();
     addr.ParseString(joinAddr);
-    client.reset(new SessionClient(callbacks, sidecarHash, port, name, deviceType, deviceIdx, delay));
+    client.reset(new SessionClient(clientCallbacks, sidecarHash, port, name, deviceType, deviceIdx, delay));
     client->Connect(addr);
 }
 
