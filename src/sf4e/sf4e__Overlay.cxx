@@ -162,7 +162,7 @@ static int mainMenuJumpCharaCount = 2;
 static int mainMenuJumpStageID = 0;
 static std::deque<std::string> clientAlerts;
 
-void Overlay::OnClientError(sf4e::SessionClient::ErrorType errType, const sf4e::SessionClient::Callbacks& callbacks) {
+void Overlay::OnClientError(SessionClient::ErrorType errType, SessionClient* const client, const SessionClient::Callbacks& callbacks) {
 	switch (errType) {
 	case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_HASH_INVALID:
 		clientAlerts.push_back("Could not join lobby: version mismatch");
@@ -953,7 +953,7 @@ void DrawNetworkJoinPanel(uint8_t deviceIdx, uint8_t deviceType) {
 	ImGui::InputScalar("Delay", ImGuiDataType_U8, &delay);
 
 	if (Button("Join")) {
-		fUserApp::StartClient(joinAddr, port, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
+		fUserApp::StartSession(joinAddr, port, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
 	}
 }
 
@@ -988,7 +988,7 @@ void DrawNetworkHostPanel(uint8_t deviceIdx, uint8_t deviceType) {
 		char hostAddr[64];
 		snprintf(hostAddr, 64, "127.0.0.1:%d", hostPort);
 		fUserApp::StartServer(hostPort, sf4e::sidecarHash);
-		fUserApp::StartClient(hostAddr, ggpoPort, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
+		fUserApp::StartSession(hostAddr, ggpoPort, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
 	}
 	ImGui::EndDisabled();
 }
@@ -997,23 +997,23 @@ void DrawNetworkLobbyPanel() {
 	static int stageID = 0;
 	static rVsMode::ConfirmedCharaConditions myConditions = { 0, 0, 0, 0, 0, 0, 0, 0, rBattle::ED_USF4};
 
-	if (!fUserApp::client) {
-		Text("No client");
+	if (!fUserApp::session) {
+		Text("No session");
 		return;
 	}
 
 	int isSelfActiveSide = -1;
 	// List the members
-	sf4e::SessionProtocol::LobbyData& lobbyData = fUserApp::client->_lobbyData;
+	sf4e::SessionProtocol::LobbyData& lobbyData = fUserApp::session->client._lobbyData;
 	for (int i = 0; i < 2 && i < lobbyData.size(); i++) {
 		const char* label = i == 0 ? "P1" : "P2";
 		Text(
 			"%s: %s (%s)",
 			label,
 			lobbyData[i].name.c_str(),
-			fUserApp::client->_matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
+			fUserApp::session->client._matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
 		);
-		if (lobbyData[i].name == fUserApp::client->_name) {
+		if (lobbyData[i].name == fUserApp::session->client._name) {
 			isSelfActiveSide = i;
 		}
 	}
@@ -1031,10 +1031,10 @@ void DrawNetworkLobbyPanel() {
 	Separator();
 	// Draw the config if the player's active
 	if (isSelfActiveSide > -1) {
-		if (fUserApp::client->_outstandingReadyRequestNumber > -1) {
+		if (fUserApp::session->client._outstandingReadyRequestNumber > -1) {
 			Text("Waiting for response...");
 		}
-		else if (fUserApp::client->_matchData.readyMessageNum[isSelfActiveSide] > -1) {
+		else if (fUserApp::session->client._matchData.readyMessageNum[isSelfActiveSide] > -1) {
 			Text("Ready!");
 		}
 		else {
@@ -1043,26 +1043,26 @@ void DrawNetworkLobbyPanel() {
 				ImGui::Combo("Stage", &stageID, Dimps::stageNames, 30);
 			}
 			if (Button("Send chara")) {
-				if (fUserApp::client->PreBattle_SetChara(myConditions) != k_EResultOK) {
+				if (fUserApp::session->client.PreBattle_SetChara(myConditions) != k_EResultOK) {
 					MessageBoxA(NULL, "Could not send chara conditions!", NULL, MB_OK);
 				}
 
 				if (isSelfActiveSide == 0) {
-					if (fUserApp::client->PreBattle_SetEnv(sf4e::localRand()) != k_EResultOK) {
+					if (fUserApp::session->client.PreBattle_SetEnv(sf4e::localRand()) != k_EResultOK) {
 						MessageBoxA(NULL, "Could not send environment!", NULL, MB_OK);
 					}
-					if (fUserApp::client->PreBattle_SetStage(stageID) != k_EResultOK) {
+					if (fUserApp::session->client.PreBattle_SetStage(stageID) != k_EResultOK) {
 						MessageBoxA(NULL, "Could not send stage!", NULL, MB_OK);
 					}
 				}
 
-				fUserApp::client->Lobby_Ready();
+				fUserApp::session->client.Lobby_Ready();
 			}
 		}
 
 		if (Button("Report win")) {
 			int loser = (isSelfActiveSide == 0) ? 1 : 0;
-			if (fUserApp::client->Lobby_ReportResults(loser) != k_EResultOK) {
+			if (fUserApp::session->client.Lobby_ReportResults(loser) != k_EResultOK) {
 				MessageBoxA(NULL, "Could not report results!", NULL, MB_OK);
 			}
 		}
@@ -1152,7 +1152,7 @@ void DrawNetworkWindow(bool* pOpen) {
 						Text("%x %s", iter->conn, iter->data.name.c_str());
 					}
 				}
-				if (fUserApp::client) {
+				if (fUserApp::session) {
 					Separator();
 					Text("Client");
 					DrawNetworkLobbyPanel();
@@ -1160,7 +1160,7 @@ void DrawNetworkWindow(bool* pOpen) {
 			}
 			break;
 		case NWS_JOIN:
-			if (!fUserApp::client) {
+			if (!fUserApp::session) {
 				DrawNetworkJoinPanel(deviceIdx, deviceType);
 				if (Button("Go back")) {
 					netState = NWS_DECIDE;

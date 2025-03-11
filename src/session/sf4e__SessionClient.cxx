@@ -10,12 +10,8 @@
 #include <ggponet.h>
 
 #include "../Dimps/Dimps.hxx"
-#include "../Dimps/Dimps__Event.hxx"
-#include "../Dimps/Dimps__GameEvents.hxx"
 #include "../Dimps/Dimps__Game__Battle__System.hxx"
-#include "../Dimps/Dimps__Pad.hxx"
 
-#include "../sf4e/sf4e__GameEvents.hxx"
 #include "../sf4e/sf4e__Game__Battle__System.hxx"
 
 #include "sf4e__SessionClient.hxx"
@@ -24,17 +20,8 @@
 using nlohmann::json;
 
 namespace SessionProtocol = sf4e::SessionProtocol;
-using Dimps::App;
-using Dimps::Event::EventBase;
-using Dimps::Event::EventBaseWithEC;
-using Dimps::Event::EventController;
 using rSystem = Dimps::Game::Battle::System;
-using rMainMenu = Dimps::GameEvents::MainMenu;
-using rVsMode = Dimps::GameEvents::VsMode;
-using fMainMenu = sf4e::GameEvents::MainMenu;
 using fSystem = sf4e::Game::Battle::System;
-using fVsBattle = sf4e::GameEvents::VsBattle;
-using fVsPreBattle = sf4e::GameEvents::VsPreBattle;
 using sf4e::SessionClient;
 using sf4e::SessionProtocol::LobbyReady;
 
@@ -45,19 +32,13 @@ SessionClient::SessionClient(
 	const Callbacks& callbacks,
 	std::string sidecarHash,
 	uint16_t ggpoPort,
-	std::string& name,
-	uint8_t deviceType,
-	uint8_t deviceIdx,
-	uint8_t delay
+	std::string& name
 ):
 	_callbacks(callbacks),
 	_sidecarHash(sidecarHash),
 	_name(name),
 	_ggpoPort(ggpoPort),
 	_interface(SteamNetworkingSockets()),
-	_delay(delay),
-	_deviceType(deviceType),
-	_deviceIdx(deviceIdx),
 	_conn(k_HSteamNetConnection_Invalid),
 	_connected(false)
 {
@@ -203,7 +184,7 @@ int SessionClient::Step()
 			default:
 				break;
 			}
-			_callbacks.OnError(errType, _callbacks);
+			_callbacks.OnError(errType, this, _callbacks);
 			_interface->CloseConnection(_conn, 0, nullptr, false);
 			_conn = k_HSteamNetConnection_Invalid;
 			return -1;
@@ -233,26 +214,7 @@ int SessionClient::Step()
 			}
 
 			if (_matchData.readyMessageNum[0] > -1 && _matchData.readyMessageNum[1] > -1) {
-				// Since handling a request forces the process to load into a battle,
-				// handling the request can only reasonably be done if the process is
-				// currently on the main menu.
-				char* mainMenuQuery[1] = { "MainMenu" };
-				rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(
-					App::GetRootEvent(),
-					mainMenuQuery,
-					1
-				);
-				if (!mainMenu) {
-					spdlog::info("Client: ignoring that both clients are ready because we're not on the main menu");
-					continue;
-				}
-
-				s_pCallbackInstance = this;
-				fVsPreBattle::bSkipToVersus = true;
-				fVsPreBattle::OnTasksRegistered = _OnVsPreBattleTasksRegistered;
-				fVsBattle::OnTasksRegistered = _OnVsBattleTasksRegistered;
-				(rMainMenu::ToItemObserver(mainMenu)->*rMainMenu::itemObserverMethods.GoToVersusMode)();
-
+				_callbacks.OnReady(this, _callbacks);
 			}
 		}
 		else if (type == SessionProtocol::MT_BATTLE_SNAPSHOT) {
@@ -339,124 +301,6 @@ int SessionClient::Step()
 	}
 
 	return 0;
-}
-
-void SessionClient::_OnVsBattleTasksRegistered()
-{
-	SessionClient* _this = s_pCallbackInstance;
-
-	// Start the GGPO connection
-	bool isPlayer = false;
-	for (int i = 0; i < 2; i++) {
-		if (_this->_lobbyData[i].name == _this->_name) {
-			isPlayer = true;
-			break;
-		}
-	}
-	if (isPlayer) {
-		GGPOPlayer players[MAX_SF4E_PROTOCOL_USERS];
-		for (int i = 0; i < 2 && i < _this->_lobbyData.size(); i++) {
-			SessionProtocol::MemberData& memberData = _this->_lobbyData[i];
-			GGPOPlayer& player = players[i];
-			player.size = sizeof(GGPOPlayer);
-			player.player_num = i + 1;
-			if (_this->_lobbyData[i].name == _this->_name) {
-				player.type = GGPO_PLAYERTYPE_LOCAL;
-
-				// Inject the chosen device into this player's side
-				Dimps::Pad::System* padSys = Dimps::Pad::System::staticMethods.GetSingleton();
-				Dimps::Pad::System::__publicMethods& padSysMethods = Dimps::Pad::System::publicMethods;
-				(padSys->*padSysMethods.AssociatePlayerAndGamepad)(i, _this->_deviceIdx);
-				(padSys->*padSysMethods.SetDeviceTypeForPlayer)(i, _this->_deviceType);
-				(padSys->*padSysMethods.SetSideHasAssignedController)(i, 1);
-				(padSys->*padSysMethods.SetActiveButtonMapping)(Dimps::Pad::System::BUTTON_MAPPING_FIGHT);
-			}
-			else {
-				SessionProtocol::MemberData& memberData = _this->_lobbyData[i];
-				player.type = GGPO_PLAYERTYPE_REMOTE;
-				if (memberData.ip.empty()) {
-					char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
-					_this->_serverAddr.ToString(szAddr, sizeof(szAddr), false);
-					strcpy_s(player.u.remote.ip_address, 32, szAddr);
-				}
-				else {
-					strcpy_s(player.u.remote.ip_address, 32, memberData.ip.c_str());
-				}
-
-				player.u.remote.port = memberData.port;
-			}
-		}
-		for (int i = 2; i < _this->_lobbyData.size(); i++) {
-			SessionProtocol::MemberData& memberData = _this->_lobbyData[i];
-			GGPOPlayer& player = players[i];
-			player.type = GGPO_PLAYERTYPE_SPECTATOR;
-			player.u.remote.port = memberData.port;
-
-			if (memberData.ip.empty()) {
-				char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
-				_this->_serverAddr.ToString(szAddr, sizeof(szAddr), false);
-				strcpy_s(player.u.remote.ip_address, 32, szAddr);
-			}
-			else {
-				strcpy_s(player.u.remote.ip_address, 32, memberData.ip.c_str());
-			}
-		}
-		fSystem::StartGGPO(players, _this->_lobbyData.size(), _this->_ggpoPort, _this->_delay, _this->_matchData.rngSeed);
-	}
-	else {
-		// Always spectate from	P1 for now- the protocol has
-		// limited enough players that there's marginal bandwidth
-		// differences.	
-		// 
-		char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
-		char* hostIP;
-		if (_this->_lobbyData[0].ip.empty()) {
-			_this->_serverAddr.ToString(szAddr, sizeof(szAddr), false);
-			hostIP = szAddr;
-		}
-		else {
-			// Safe-_ish_ removal of const. This gets passed through
-			// to an inet_pton() call and never modified.
-			hostIP = (char*)_this->_lobbyData[0].ip.c_str();
-		}
-
-		fSystem::StartSpectating(
-			_this->_ggpoPort,
-			2,
-			hostIP,
-			_this->_lobbyData[0].port,
-			_this->_matchData.rngSeed
-		);
-	}
-}
-
-void SessionClient::_OnVsPreBattleTasksRegistered()
-{
-	SessionClient* _this = s_pCallbackInstance;
-	size_t charaConditionSize = sizeof(rVsMode::ConfirmedCharaConditions);
-
-	// XXX (adanducci): this is a little fragile- it's technically possible
-	// that the pre-battle event is constructed in another context, but
-	// practically speaking the VsPreBattle event will always be used in
-	// the context of VsMode.
-	char* vsModeQuery[] = { "VSMode" };
-	rVsMode* mode = (rVsMode*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsModeQuery, 1);
-	if (!mode) {
-		spdlog::error("VsPreBattle tasks registered, but the current foreground event isn't VSMode!");
-		return;
-	}
-
-	Dimps::Platform::dString* stageName = rVsMode::GetStageName(mode);
-	rVsMode::ConfirmedPlayerConditions* conditions = rVsMode::GetConfirmedPlayerConditions(mode);
-	for (int i = 0; i < 2; i++) {
-		*(rVsMode::ConfirmedPlayerConditions::GetCharaID(&conditions[i])) = _this->_matchData.chara[i].charaID;
-		*(rVsMode::ConfirmedPlayerConditions::GetSideActive(&conditions[i])) = 1;
-		rVsMode::ConfirmedCharaConditions* charaConditions = rVsMode::ConfirmedPlayerConditions::GetCharaConditions(&conditions[i]);
-		memcpy_s(charaConditions, charaConditionSize, &_this->_matchData.chara[i], charaConditionSize);
-	}
-
-	(stageName->*Dimps::Platform::dString::publicMethods.assign)(Dimps::stageCodes[_this->_matchData.stageID], 4);
-	*(rVsMode::GetStageCode(mode)) = _this->_matchData.stageID;
 }
 
 void SessionClient::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* pInfo)

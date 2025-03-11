@@ -113,7 +113,7 @@ add_library(Session STATIC
 target_link_libraries(
     Session
     PRIVATE Dimps
-    PUBLIC nlohmann_json::nlohmann_json spdlog::spdlog GameNetworkingSockets::shared ggpo::GGPO
+    PUBLIC nlohmann_json::nlohmann_json spdlog::spdlog GameNetworkingSockets::shared
 )
 
 add_executable(SessionInteractiveTest "src/session/interactive_test.cxx")

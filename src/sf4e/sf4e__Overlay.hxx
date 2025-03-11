@@ -10,7 +10,7 @@ namespace sf4e {
 		void InitializeOverlay(HWND hWnd, IDirect3DDevice9* lpDevice);
 		void DrawOverlay();
 		void FreeOverlay();
-		void OnClientError(SessionClient::ErrorType errType, const SessionClient::Callbacks& callbacks);
+		void OnClientError(SessionClient::ErrorType errType, SessionClient* const client, const SessionClient::Callbacks& callbacks);
 
 		LRESULT WINAPI OverlayWindowFunc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	}

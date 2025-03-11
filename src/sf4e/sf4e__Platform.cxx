@@ -175,8 +175,8 @@ int fMain::Initialize(void* a, void* b, void* c) {
 }
 
 void fMain::Destroy() {
-    if (fUserApp::client) {
-        delete fUserApp::client.release();
+    if (fUserApp::session) {
+        delete fUserApp::session.release();
     }
     if (fUserApp::server) {
         delete fUserApp::server.release();

@@ -60,20 +60,14 @@ struct TestingSessionClient {
     TestingSessionClient(
         std::string sidecarHash,
         uint16_t ggpoPort,
-        std::string& name,
-        uint8_t deviceType,
-        uint8_t deviceIdx,
-        uint8_t delay
+        std::string& name
     ) : 
-        callbacks{ this, OnError },
+        callbacks{ this, OnError, OnReady },
         c(
             callbacks,
             sidecarHash,
             ggpoPort,
-            name,
-            deviceType,
-            deviceIdx,
-            delay
+            name
         ), menuCharaID(0)
     {
         envMsg.rngSeed = 0;
@@ -90,7 +84,7 @@ struct TestingSessionClient {
         reportResultsReqBuf.loserSide = 0;
     }
 
-    static void OnError(SessionClient::ErrorType errType, const SessionClient::Callbacks& callbacks) {
+    static void OnError(SessionClient::ErrorType errType, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
         TestingSessionClient* client = (TestingSessionClient*)callbacks.data;
         switch (errType) {
         case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_HASH_INVALID:
@@ -109,6 +103,11 @@ struct TestingSessionClient {
             client->alerts.push_back("Unknown error occurred");
             break;
         }
+    }
+
+    static void OnReady(SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+        TestingSessionClient* client = (TestingSessionClient*)callbacks.data;
+        client->alerts.push_back("Ready!");
     }
 };
 
@@ -256,10 +255,7 @@ int DrawServerWindow() {
             g_clients.emplace_back(
                 std::string(nextClientHash),
                 nNextGgpoPort,
-                std::string(szNewClientName),
-                0,
-                0,
-                0
+                std::string(szNewClientName)
             );
             g_clients.back().c.Connect(pOutConnection2);
             nNextClientID++;

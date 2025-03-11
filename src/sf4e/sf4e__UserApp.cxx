@@ -8,42 +8,222 @@
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 #include <spdlog/spdlog.h>
 
+#include "../Dimps/Dimps.hxx"
+#include "../Dimps/Dimps__Event.hxx"
 #include "../Dimps/Dimps__GameEvents.hxx"
+#include "../Dimps/Dimps__Pad.hxx"
 #include "../Dimps/Dimps__UserApp.hxx"
 #include "../session/sf4e__SessionClient.hxx"
+#include "../session/sf4e__SessionProtocol.hxx"
 #include "../session/sf4e__SessionServer.hxx"
 
 #include "sf4e__Game__Battle.hxx"
 #include "sf4e__Game__Battle__System.hxx"
+#include "sf4e__GameEvents.hxx"
 #include "sf4e__Overlay.hxx"
 #include "sf4e__UserApp.hxx"
 
+namespace SessionProtocol = sf4e::SessionProtocol;
+using Dimps::App;
+using Dimps::Event::EventBase;
+using Dimps::Event::EventBaseWithEC;
+using Dimps::Event::EventController;
+using rMainMenu = Dimps::GameEvents::MainMenu;
 using rVsMode = Dimps::GameEvents::VsMode;
 using rUserApp = Dimps::UserApp;
 using fSystem = sf4e::Game::Battle::System;
 using fUserApp = sf4e::UserApp;
+using fMainMenu = sf4e::GameEvents::MainMenu;
+using fVsBattle = sf4e::GameEvents::VsBattle;
+using fVsPreBattle = sf4e::GameEvents::VsPreBattle;
 using sf4e::Game::Battle::Sound::SoundPlayerManager;
 using sf4e::SessionClient;
 using sf4e::SessionServer;
 
-std::unique_ptr<SessionClient> fUserApp::client;
+std::unique_ptr<fUserApp::Session> fUserApp::session;
 std::unique_ptr<SessionServer> fUserApp::server;
+
+sf4e::UserApp::Session::Session(
+	const SessionClient::Callbacks& callbacks,
+	std::string sidecarHash,
+	uint16_t ggpoPort,
+	std::string& name,
+	uint8_t _deviceType,
+	uint8_t _deviceIdx,
+	uint8_t _delay
+):
+	client(callbacks, sidecarHash, ggpoPort, name),
+	deviceType(_deviceType),
+	deviceIdx(_deviceIdx),
+	delay(_delay)
+{}
+
+void fUserApp::_OnVsBattleTasksRegistered()
+{
+	// Start the GGPO connection
+	bool isPlayer = false;
+	for (int i = 0; i < 2; i++) {
+		if (session->client._lobbyData[i].name == session->client._name) {
+			isPlayer = true;
+			break;
+		}
+	}
+	if (isPlayer) {
+		GGPOPlayer players[MAX_SF4E_PROTOCOL_USERS];
+		for (int i = 0; i < 2 && i < session->client._lobbyData.size(); i++) {
+			SessionProtocol::MemberData& memberData = session->client._lobbyData[i];
+			GGPOPlayer& player = players[i];
+			player.size = sizeof(GGPOPlayer);
+			player.player_num = i + 1;
+			if (session->client._lobbyData[i].name == session->client._name) {
+				player.type = GGPO_PLAYERTYPE_LOCAL;
+
+				// Inject the chosen device into this player's side
+				Dimps::Pad::System* padSys = Dimps::Pad::System::staticMethods.GetSingleton();
+				Dimps::Pad::System::__publicMethods& padSysMethods = Dimps::Pad::System::publicMethods;
+				(padSys->*padSysMethods.AssociatePlayerAndGamepad)(i, session->deviceIdx);
+				(padSys->*padSysMethods.SetDeviceTypeForPlayer)(i, session->deviceType);
+				(padSys->*padSysMethods.SetSideHasAssignedController)(i, 1);
+				(padSys->*padSysMethods.SetActiveButtonMapping)(Dimps::Pad::System::BUTTON_MAPPING_FIGHT);
+			}
+			else {
+				SessionProtocol::MemberData& memberData = session->client._lobbyData[i];
+				player.type = GGPO_PLAYERTYPE_REMOTE;
+				if (memberData.ip.empty()) {
+					char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
+					session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
+					strcpy_s(player.u.remote.ip_address, 32, szAddr);
+				}
+				else {
+					strcpy_s(player.u.remote.ip_address, 32, memberData.ip.c_str());
+				}
+
+				player.u.remote.port = memberData.port;
+			}
+		}
+		for (int i = 2; i < session->client._lobbyData.size(); i++) {
+			SessionProtocol::MemberData& memberData = session->client._lobbyData[i];
+			GGPOPlayer& player = players[i];
+			player.type = GGPO_PLAYERTYPE_SPECTATOR;
+			player.u.remote.port = memberData.port;
+
+			if (memberData.ip.empty()) {
+				char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
+				session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
+				strcpy_s(player.u.remote.ip_address, 32, szAddr);
+			}
+			else {
+				strcpy_s(player.u.remote.ip_address, 32, memberData.ip.c_str());
+			}
+		}
+		fSystem::StartGGPO(
+			players,
+			session->client._lobbyData.size(),
+			session->client._ggpoPort,
+			session->delay,
+			session->client._matchData.rngSeed
+		);
+	}
+	else {
+		// Always spectate from	P1 for now- the protocol has
+		// limited enough players that there's marginal bandwidth
+		// differences.	
+		// 
+		char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
+		char* hostIP;
+		if (session->client._lobbyData[0].ip.empty()) {
+			session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
+			hostIP = szAddr;
+		}
+		else {
+			// Safe-_ish_ removal of const. This gets passed through
+			// to an inet_pton() call and never modified.
+			hostIP = (char*)session->client._lobbyData[0].ip.c_str();
+		}
+
+		fSystem::StartSpectating(
+			session->client._ggpoPort,
+			2,
+			hostIP,
+			session->client._lobbyData[0].port,
+			session->client._matchData.rngSeed
+		);
+	}
+}
+
+void fUserApp::_OnVsPreBattleTasksRegistered()
+{
+    size_t charaConditionSize = sizeof(rVsMode::ConfirmedCharaConditions);
+
+    // XXX (adanducci): this is a little fragile- it's technically possible
+    // that the pre-battle event is constructed in another context, but
+    // practically speaking the VsPreBattle event will always be used in
+    // the context of VsMode.
+    char* vsModeQuery[] = { "VSMode" };
+    rVsMode* mode = (rVsMode*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsModeQuery, 1);
+    if (!mode) {
+        spdlog::error("VsPreBattle tasks registered, but the current foreground event isn't VSMode!");
+        return;
+    }
+
+    Dimps::Platform::dString* stageName = rVsMode::GetStageName(mode);
+    rVsMode::ConfirmedPlayerConditions* conditions = rVsMode::GetConfirmedPlayerConditions(mode);
+    for (int i = 0; i < 2; i++) {
+        *(rVsMode::ConfirmedPlayerConditions::GetCharaID(&conditions[i])) = session->client._matchData.chara[i].charaID;
+        *(rVsMode::ConfirmedPlayerConditions::GetSideActive(&conditions[i])) = 1;
+        rVsMode::ConfirmedCharaConditions* charaConditions = rVsMode::ConfirmedPlayerConditions::GetCharaConditions(&conditions[i]);
+        memcpy_s(charaConditions, charaConditionSize, &session->client._matchData.chara[i], charaConditionSize);
+    }
+
+    (stageName->*Dimps::Platform::dString::publicMethods.assign)(Dimps::stageCodes[session->client._matchData.stageID], 4);
+    *(rVsMode::GetStageCode(mode)) = session->client._matchData.stageID;
+}
+
+void OnReady(sf4e::SessionClient* const client, const sf4e::SessionClient::Callbacks& c) {
+    // Since handling a request forces the process to load into a battle,
+    // handling the request can only reasonably be done if the process is
+    // currently on the main menu.
+    char* mainMenuQuery[1] = { "MainMenu" };
+    rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(
+        App::GetRootEvent(),
+        mainMenuQuery,
+        1
+    );
+    if (!mainMenu) {
+        spdlog::info("Client: ignoring that both clients are ready because we're not on the main menu");
+        return;
+    }
+
+    fVsPreBattle::bSkipToVersus = true;
+    fVsPreBattle::OnTasksRegistered = fUserApp::_OnVsPreBattleTasksRegistered;
+    fVsBattle::OnTasksRegistered = fUserApp::_OnVsBattleTasksRegistered;
+    (rMainMenu::ToItemObserver(mainMenu)->*rMainMenu::itemObserverMethods.GoToVersusMode)();
+}
 
 sf4e::SessionClient::Callbacks clientCallbacks = {
     nullptr,
-    sf4e::Overlay::OnClientError
+    sf4e::Overlay::OnClientError,
+    OnReady
 };
 
 void fUserApp::Install() {
     DetourAttach((PVOID*)&rUserApp::staticMethods.Steam_PostUpdate, Steam_PostUpdate);
 }
 
-void fUserApp::StartClient(char* joinAddr, uint16_t port, std::string& sidecarHash, std::string& name, uint8_t deviceType, uint8_t deviceIdx, uint8_t delay) {
+void fUserApp::StartSession(char* joinAddr, uint16_t port, std::string& sidecarHash, std::string& name, uint8_t deviceType, uint8_t deviceIdx, uint8_t delay) {
     SteamNetworkingIPAddr addr;
     addr.Clear();
     addr.ParseString(joinAddr);
-    client.reset(new SessionClient(clientCallbacks, sidecarHash, port, name, deviceType, deviceIdx, delay));
-    client->Connect(addr);
+	session.reset(new Session(
+		clientCallbacks,
+		sidecarHash,
+		port,
+		name,
+		deviceType,
+		deviceIdx,
+		delay
+	));
+	session->client.Connect(addr);
 }
 
 void fUserApp::StartServer(uint16 hostPort, std::string& sidecarHash) {
@@ -52,17 +232,17 @@ void fUserApp::StartServer(uint16 hostPort, std::string& sidecarHash) {
 }
 
 void fUserApp::Steam_PostUpdate() {
-    if (client) {
-        client->PrepareForCallbacks();
+    if (session) {
+        session->client.PrepareForCallbacks();
     }
     if (server) {
         server->PrepareForCallbacks();
     }
     SteamNetworkingSockets()->RunCallbacks();
 
-    if (client) {
-        if (client->Step()) {
-            delete client.release();
+    if (session) {
+        if (session->client.Step()) {
+            delete session.release();
         }
     }
 

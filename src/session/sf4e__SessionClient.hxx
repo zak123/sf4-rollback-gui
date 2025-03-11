@@ -26,17 +26,15 @@ namespace sf4e {
 
 		struct Callbacks {
 			void* data;
-			void (*OnError)(ErrorType errorType, const Callbacks& callbacks);
+			void (*OnError)(ErrorType errorType, SessionClient* const client, const Callbacks& callbacks);
+			void (*OnReady)(SessionClient* const client, const Callbacks& callbacks);
 		};
 
 		SessionClient(
 			const Callbacks& callbacks,
 			std::string sidecarHash,
 			uint16_t ggpoPort,
-			std::string& name,
-			uint8_t deviceType,
-			uint8_t deviceIdx,
-			uint8_t delay
+			std::string& name
 		);
 		~SessionClient();
 
@@ -66,19 +64,14 @@ namespace sf4e {
 		// Connection related data - public for testing
 		std::string _sidecarHash;
 		uint16_t _ggpoPort;
+		SteamNetworkingIPAddr _serverAddr;
 	private:
 
 		// Connection related data
 		Callbacks _callbacks;
 		bool _connected = false;
-		SteamNetworkingIPAddr _serverAddr;
 		HSteamNetConnection _conn;
 		ISteamNetworkingSockets* _interface;
-
-		// Lobby data
-		uint8_t _delay;
-		uint8_t _deviceType;
-		uint8_t _deviceIdx;
 
 		std::map<int, SessionProtocol::StateSnapshot> pendingRemoteSnapshots;
 
@@ -86,7 +79,5 @@ namespace sf4e {
 
 		static SessionClient* s_pCallbackInstance;
 		static void SteamNetConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t* pInfo);
-		static void _OnVsBattleTasksRegistered();
-		static void _OnVsPreBattleTasksRegistered();
 	};
 }
