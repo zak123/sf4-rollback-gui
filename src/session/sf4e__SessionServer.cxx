@@ -92,6 +92,7 @@ int SessionServer::Step()
 {
 	ISteamNetworkingMessage* pIncomingMsgs[SESSION_SERVER_MAX_MESSAGES_PER_POLL] = { 0 };
 	int numMsgs = _interface->ReceiveMessagesOnPollGroup(_pollGroup, pIncomingMsgs, SESSION_SERVER_MAX_MESSAGES_PER_POLL);
+	bool bSendAllReady = false;
 
 	if (numMsgs < 0) {
 		spdlog::error("Session server error checking for messages: {}", numMsgs);
@@ -247,6 +248,7 @@ int SessionServer::Step()
 				continue;
 			}
 			_matchData.readyMessageNum[side] = pIncomingMsg->GetMessageNumber();
+			bSendAllReady = bSendAllReady || _matchData.IsAllReady();
 			_dataDirty = true;
 		}
 		else if (type == SessionProtocol::MT_LOBBY_REPORTRESULTS) {
@@ -292,6 +294,7 @@ int SessionServer::Step()
 		dataUpdateMsg["type"] = SessionProtocol::MT_SESSION_DATAUPDATE;
 		dataUpdateMsg["lobbyData"] = clients;
 		dataUpdateMsg["matchData"] = _matchData;
+		BroadcastMessage(dataUpdateMsg);
 		std::string buf = dataUpdateMsg.dump();
 
 		for (auto clientIter = clients.begin(); clientIter != clients.end(); clientIter++) {
@@ -303,6 +306,10 @@ int SessionServer::Step()
 		_dataDirty = false;
 	}
 
+	if (bSendAllReady) {
+		BroadcastMessage(json(SessionProtocol::LobbyAllReady()));
+	}
+
 	return 0;
 }
 
@@ -312,6 +319,16 @@ void SessionServer::Respond(HSteamNetConnection client, nlohmann::json& msg) {
 		client, buf.c_str(), (uint32)buf.length(),
 		k_nSteamNetworkingSend_Reliable, nullptr
 	);
+}
+
+void SessionServer::BroadcastMessage(nlohmann::json& msg) {
+	std::string buf = msg.dump();
+	for (auto clientIter = clients.begin(); clientIter != clients.end(); clientIter++) {
+		_interface->SendMessageToConnection(
+			clientIter->conn, buf.c_str(), (uint32)buf.length(),
+			k_nSteamNetworkingSend_Reliable, nullptr
+		);
+	}
 }
 
 int SessionServer::Close()

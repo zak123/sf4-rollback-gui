@@ -216,10 +216,9 @@ int SessionClient::Step()
 					}
 				}
 			}
-
-			if (_matchData.readyMessageNum[0] > -1 && _matchData.readyMessageNum[1] > -1) {
-				_callbacks.OnReady(this, _callbacks);
-			}
+		}
+		else if (type == SessionProtocol::MT_LOBBY_ALLREADY) {
+			_callbacks.OnReady(this, _callbacks);
 		}
 		else if (type == SessionProtocol::MT_BATTLE_SNAPSHOT) {
 			SessionProtocol::BattleSnapshot m;

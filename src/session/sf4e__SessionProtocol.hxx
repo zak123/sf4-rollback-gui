@@ -27,6 +27,7 @@ namespace sf4e {
 		struct MatchData {
 			MatchData();
 			void Clear();
+			bool IsAllReady();
 
 			int64_t readyMessageNum[2];
 			Dimps::GameEvents::VsMode::ConfirmedCharaConditions chara[2];
@@ -40,6 +41,7 @@ namespace sf4e {
 			MT_SESSION_JOINREJ,
 
 			MT_LOBBY_READY,
+			MT_LOBBY_ALLREADY,
 			MT_LOBBY_REPORTRESULTS,
 
 			MT_PREBATTLE_SETENV,
@@ -55,6 +57,7 @@ namespace sf4e {
 			{MT_SESSION_JOINREQ, "join_req"},
 
 			{MT_LOBBY_READY, "lobby_ready"},
+			{MT_LOBBY_ALLREADY, "lobby_allready"},
 			{MT_LOBBY_REPORTRESULTS, "lobby_reportresults"},
 
 			{MT_PREBATTLE_SETENV, "prebattle_setenv"},
@@ -100,6 +103,10 @@ namespace sf4e {
 
 		struct LobbyReady {
 			MessageType type = MT_LOBBY_READY;
+		};
+
+		struct LobbyAllReady {
+			MessageType type = MT_LOBBY_ALLREADY;
 		};
 
 		struct LobbyReportResults {
@@ -160,6 +167,7 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinRequest, type, sidecarHash, username, port);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyReady, type);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyAllReady, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyReportResults, type, loserSide);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PreBattleSetChara, type, chara);
