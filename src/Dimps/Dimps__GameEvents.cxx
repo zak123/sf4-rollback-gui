@@ -84,6 +84,10 @@ MainMenu* MainMenu::FromItemObserver(MainMenu* s) {
 	return (MainMenu*)((unsigned int)s - 0x40);
 }
 
+Dimps::Game::ProgressData** RootEvent::GetProgressData(RootEvent* e) {
+	return (Dimps::Game::ProgressData**)((unsigned int)e + 0x6c);
+}
+
 void RootEvent::Locate(HMODULE peRoot) {
 	unsigned int peRootOffset = (unsigned int)peRoot;
 

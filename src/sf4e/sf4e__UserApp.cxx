@@ -10,7 +10,9 @@
 
 #include "../Dimps/Dimps.hxx"
 #include "../Dimps/Dimps__Event.hxx"
+#include "../Dimps/Dimps__Game.hxx"
 #include "../Dimps/Dimps__GameEvents.hxx"
+#include "../Dimps/Dimps__Math.hxx"
 #include "../Dimps/Dimps__Pad.hxx"
 #include "../Dimps/Dimps__UserApp.hxx"
 #include "../session/sf4e__SessionClient.hxx"
@@ -28,6 +30,9 @@ using Dimps::App;
 using Dimps::Event::EventBase;
 using Dimps::Event::EventBaseWithEC;
 using Dimps::Event::EventController;
+using Dimps::Game::ProgressData;
+using Dimps::GameEvents::RootEvent;
+using Dimps::Math::FixedPoint;
 using rMainMenu = Dimps::GameEvents::MainMenu;
 using rVsMode = Dimps::GameEvents::VsMode;
 using rUserApp = Dimps::UserApp;
@@ -44,111 +49,111 @@ std::unique_ptr<fUserApp::Session> fUserApp::session;
 std::unique_ptr<SessionServer> fUserApp::server;
 
 sf4e::UserApp::Session::Session(
-	const SessionClient::Callbacks& callbacks,
-	std::string sidecarHash,
-	uint16_t ggpoPort,
-	std::string& name,
-	uint8_t _deviceType,
-	uint8_t _deviceIdx,
-	uint8_t _delay
+    const SessionClient::Callbacks& callbacks,
+    std::string sidecarHash,
+    uint16_t ggpoPort,
+    std::string& name,
+    uint8_t _deviceType,
+    uint8_t _deviceIdx,
+    uint8_t _delay
 ):
-	client(callbacks, sidecarHash, ggpoPort, name),
-	deviceType(_deviceType),
-	deviceIdx(_deviceIdx),
-	delay(_delay)
+    client(callbacks, sidecarHash, ggpoPort, name),
+    deviceType(_deviceType),
+    deviceIdx(_deviceIdx),
+    delay(_delay)
 {}
 
 void fUserApp::_OnVsBattleTasksRegistered()
 {
-	// Start the GGPO connection
-	bool isPlayer = false;
-	for (int i = 0; i < 2; i++) {
-		if (session->client._lobbyData[i].name == session->client._name) {
-			isPlayer = true;
-			break;
-		}
-	}
-	if (isPlayer) {
-		GGPOPlayer players[MAX_SF4E_PROTOCOL_USERS];
-		for (int i = 0; i < 2 && i < session->client._lobbyData.size(); i++) {
-			SessionProtocol::MemberData& memberData = session->client._lobbyData[i];
-			GGPOPlayer& player = players[i];
-			player.size = sizeof(GGPOPlayer);
-			player.player_num = i + 1;
-			if (session->client._lobbyData[i].name == session->client._name) {
-				player.type = GGPO_PLAYERTYPE_LOCAL;
+    // Start the GGPO connection
+    bool isPlayer = false;
+    for (int i = 0; i < 2; i++) {
+        if (session->client._lobbyData.members[i].name == session->client._name) {
+            isPlayer = true;
+            break;
+        }
+    }
+    if (isPlayer) {
+        GGPOPlayer players[MAX_SF4E_PROTOCOL_USERS];
+        for (int i = 0; i < 2 && i < session->client._lobbyData.members.size(); i++) {
+            SessionProtocol::MemberData& memberData = session->client._lobbyData.members[i];
+            GGPOPlayer& player = players[i];
+            player.size = sizeof(GGPOPlayer);
+            player.player_num = i + 1;
+            if (session->client._lobbyData.members[i].name == session->client._name) {
+                player.type = GGPO_PLAYERTYPE_LOCAL;
 
-				// Inject the chosen device into this player's side
-				Dimps::Pad::System* padSys = Dimps::Pad::System::staticMethods.GetSingleton();
-				Dimps::Pad::System::__publicMethods& padSysMethods = Dimps::Pad::System::publicMethods;
-				(padSys->*padSysMethods.AssociatePlayerAndGamepad)(i, session->deviceIdx);
-				(padSys->*padSysMethods.SetDeviceTypeForPlayer)(i, session->deviceType);
-				(padSys->*padSysMethods.SetSideHasAssignedController)(i, 1);
-				(padSys->*padSysMethods.SetActiveButtonMapping)(Dimps::Pad::System::BUTTON_MAPPING_FIGHT);
-			}
-			else {
-				SessionProtocol::MemberData& memberData = session->client._lobbyData[i];
-				player.type = GGPO_PLAYERTYPE_REMOTE;
-				if (memberData.ip.empty()) {
-					char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
-					session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
-					strcpy_s(player.u.remote.ip_address, 32, szAddr);
-				}
-				else {
-					strcpy_s(player.u.remote.ip_address, 32, memberData.ip.c_str());
-				}
+                // Inject the chosen device into this player's side
+                Dimps::Pad::System* padSys = Dimps::Pad::System::staticMethods.GetSingleton();
+                Dimps::Pad::System::__publicMethods& padSysMethods = Dimps::Pad::System::publicMethods;
+                (padSys->*padSysMethods.AssociatePlayerAndGamepad)(i, session->deviceIdx);
+                (padSys->*padSysMethods.SetDeviceTypeForPlayer)(i, session->deviceType);
+                (padSys->*padSysMethods.SetSideHasAssignedController)(i, 1);
+                (padSys->*padSysMethods.SetActiveButtonMapping)(Dimps::Pad::System::BUTTON_MAPPING_FIGHT);
+            }
+            else {
+                SessionProtocol::MemberData& memberData = session->client._lobbyData.members[i];
+                player.type = GGPO_PLAYERTYPE_REMOTE;
+                if (memberData.ip.empty()) {
+                    char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
+                    session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
+                    strcpy_s(player.u.remote.ip_address, 32, szAddr);
+                }
+                else {
+                    strcpy_s(player.u.remote.ip_address, 32, memberData.ip.c_str());
+                }
 
-				player.u.remote.port = memberData.port;
-			}
-		}
-		for (int i = 2; i < session->client._lobbyData.size(); i++) {
-			SessionProtocol::MemberData& memberData = session->client._lobbyData[i];
-			GGPOPlayer& player = players[i];
-			player.type = GGPO_PLAYERTYPE_SPECTATOR;
-			player.u.remote.port = memberData.port;
+                player.u.remote.port = memberData.port;
+            }
+        }
+        for (int i = 2; i < session->client._lobbyData.members.size(); i++) {
+            SessionProtocol::MemberData& memberData = session->client._lobbyData.members[i];
+            GGPOPlayer& player = players[i];
+            player.type = GGPO_PLAYERTYPE_SPECTATOR;
+            player.u.remote.port = memberData.port;
 
-			if (memberData.ip.empty()) {
-				char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
-				session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
-				strcpy_s(player.u.remote.ip_address, 32, szAddr);
-			}
-			else {
-				strcpy_s(player.u.remote.ip_address, 32, memberData.ip.c_str());
-			}
-		}
-		fSystem::StartGGPO(
-			players,
-			session->client._lobbyData.size(),
-			session->client._ggpoPort,
-			session->delay,
-			session->client._matchData.rngSeed
-		);
-	}
-	else {
-		// Always spectate from	P1 for now- the protocol has
-		// limited enough players that there's marginal bandwidth
-		// differences.	
-		// 
-		char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
-		char* hostIP;
-		if (session->client._lobbyData[0].ip.empty()) {
-			session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
-			hostIP = szAddr;
-		}
-		else {
-			// Safe-_ish_ removal of const. This gets passed through
-			// to an inet_pton() call and never modified.
-			hostIP = (char*)session->client._lobbyData[0].ip.c_str();
-		}
+            if (memberData.ip.empty()) {
+                char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
+                session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
+                strcpy_s(player.u.remote.ip_address, 32, szAddr);
+            }
+            else {
+                strcpy_s(player.u.remote.ip_address, 32, memberData.ip.c_str());
+            }
+        }
+        fSystem::StartGGPO(
+            players,
+            session->client._lobbyData.members.size(),
+            session->client._ggpoPort,
+            session->delay,
+            session->client._matchData.rngSeed
+        );
+    }
+    else {
+        // Always spectate from	P1 for now- the protocol has
+        // limited enough players that there's marginal bandwidth
+        // differences.	
+        // 
+        char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
+        char* hostIP;
+        if (session->client._lobbyData.members[0].ip.empty()) {
+            session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
+            hostIP = szAddr;
+        }
+        else {
+            // Safe-_ish_ removal of const. This gets passed through
+            // to an inet_pton() call and never modified.
+            hostIP = (char*)session->client._lobbyData.members[0].ip.c_str();
+        }
 
-		fSystem::StartSpectating(
-			session->client._ggpoPort,
-			2,
-			hostIP,
-			session->client._lobbyData[0].port,
-			session->client._matchData.rngSeed
-		);
-	}
+        fSystem::StartSpectating(
+            session->client._ggpoPort,
+            2,
+            hostIP,
+            session->client._lobbyData.members[0].port,
+            session->client._matchData.rngSeed
+        );
+    }
 }
 
 void fUserApp::_OnVsPreBattleTasksRegistered()
@@ -183,9 +188,10 @@ void OnReady(sf4e::SessionClient* const client, const sf4e::SessionClient::Callb
     // Since handling a request forces the process to load into a battle,
     // handling the request can only reasonably be done if the process is
     // currently on the main menu.
+    RootEvent* root = App::GetRootEvent();
     char* mainMenuQuery[1] = { "MainMenu" };
     rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(
-        App::GetRootEvent(),
+        root,
         mainMenuQuery,
         1
     );
@@ -194,6 +200,12 @@ void OnReady(sf4e::SessionClient* const client, const sf4e::SessionClient::Callb
         return;
     }
 
+    ProgressData* progressData = *RootEvent::GetProgressData(root);
+    ProgressData::BattleTypeSettings* BattleTypeSettings = &(ProgressData::GetBattleTypeSettings(progressData)[ProgressData::NBT_PVP]);
+    *ProgressData::GetNextBattleType(progressData) = ProgressData::NBT_PVP;
+    BattleTypeSettings->editionSelect = client->_lobbyData.editionSelect;
+    BattleTypeSettings->rounds = client->_lobbyData.roundCount;
+    BattleTypeSettings->timeLimit = client->_lobbyData.roundTime;
     fVsPreBattle::bSkipToVersus = true;
     fVsPreBattle::OnTasksRegistered = fUserApp::_OnVsPreBattleTasksRegistered;
     fVsBattle::OnTasksRegistered = fUserApp::_OnVsBattleTasksRegistered;
@@ -214,20 +226,20 @@ void fUserApp::StartSession(char* joinAddr, uint16_t port, std::string& sidecarH
     SteamNetworkingIPAddr addr;
     addr.Clear();
     addr.ParseString(joinAddr);
-	session.reset(new Session(
-		clientCallbacks,
-		sidecarHash,
-		port,
-		name,
-		deviceType,
-		deviceIdx,
-		delay
-	));
-	session->client.Connect(addr);
+    session.reset(new Session(
+        clientCallbacks,
+        sidecarHash,
+        port,
+        name,
+        deviceType,
+        deviceIdx,
+        delay
+    ));
+    session->client.Connect(addr);
 }
 
-void fUserApp::StartServer(uint16 hostPort, std::string& sidecarHash) {
-    server.reset(new SessionServer(sidecarHash));
+void fUserApp::StartServer(uint16 hostPort, std::string& sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) {
+    server.reset(new SessionServer(sidecarHash, editionSelect, roundCount, roundTime));
     server->Listen(hostPort);
 }
 

@@ -39,6 +39,25 @@ namespace Dimps {
 			int nextMementoIndex;
 		};
 
+		struct ProgressData {
+			enum NextBattleType {
+				NBT_PVP = 0,
+				NBT_PVC = 1,
+				NBT_CVC = 2,
+			};
+
+			struct BattleTypeSettings {
+				int diffculty;
+				int rounds;
+				Math::FixedPoint timeLimit;
+				BOOL recordReplay;
+				BOOL editionSelect;
+			};
+
+			static NextBattleType* GetNextBattleType(ProgressData* data);
+			static BattleTypeSettings* GetBattleTypeSettings(ProgressData* data);
+		};
+
 		struct Request {
 			typedef struct __publicMethods {
 				DWORD (Request::* GetRandomSeed)();

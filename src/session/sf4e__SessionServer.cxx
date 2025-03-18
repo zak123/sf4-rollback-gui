@@ -11,6 +11,7 @@
 #include "../Dimps/Dimps.hxx"
 #include "../Dimps/Dimps__Event.hxx"
 #include "../Dimps/Dimps__GameEvents.hxx"
+#include "../Dimps/Dimps__Math.hxx"
 #include "../Dimps/Dimps__Pad.hxx"
 #include "../sf4e/sf4e__Game__Battle__System.hxx"
 #include "../sf4e/sf4e__GameEvents.hxx"
@@ -21,20 +22,23 @@
 using nlohmann::json;
 
 namespace SessionProtocol = sf4e::SessionProtocol;
+using Dimps::Math::FixedPoint;
 using sf4e::SessionServer;
 
 
 const int sf4e::SESSION_SERVER_MAX_MESSAGES_PER_POLL = 200;
 SessionServer* SessionServer::s_pCallbackInstance;
 
-SessionServer::SessionServer(std::string sidecarHash) :
+SessionServer::SessionServer(std::string sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) :
 	_sidecarHash(sidecarHash),
 	_interface(SteamNetworkingSockets()),
-	_lobbyData(),
-	_matchData(),
 	_dataDirty(false),
+	_lobbyData(),
 	_listenSock(k_HSteamListenSocket_Invalid)
 {
+	_lobbyData.editionSelect = editionSelect;
+	_lobbyData.roundCount = roundCount;
+	_lobbyData.roundTime = roundTime;
 	clients.reserve(MAX_SF4E_PROTOCOL_USERS + 1);
 	_pollGroup = _interface->CreatePollGroup();
 }
@@ -287,22 +291,15 @@ int SessionServer::Step()
 		}
 	}
 
-	// XXX (adanducci) replace SendMessageToConnection with SendMessages for
-	// peformance gains, but ensuring low-copy with it is annoyingly difficult.
 	if (_dataDirty) {
-		json dataUpdateMsg;
-		dataUpdateMsg["type"] = SessionProtocol::MT_SESSION_DATAUPDATE;
-		dataUpdateMsg["lobbyData"] = clients;
-		dataUpdateMsg["matchData"] = _matchData;
-		BroadcastMessage(dataUpdateMsg);
-		std::string buf = dataUpdateMsg.dump();
-
+		SessionProtocol::SessionDataUpdate updateMsg;
+		updateMsg.lobbyData = _lobbyData;
+		updateMsg.matchData = _matchData;
+		updateMsg.lobbyData.members.clear();
 		for (auto clientIter = clients.begin(); clientIter != clients.end(); clientIter++) {
-			_interface->SendMessageToConnection(
-				clientIter->conn, buf.c_str(), (uint32)buf.length(),
-				k_nSteamNetworkingSend_Reliable, nullptr
-			);
+			updateMsg.lobbyData.members.push_back(clientIter->data);
 		}
+		BroadcastMessage(json(updateMsg));
 		_dataDirty = false;
 	}
 
@@ -322,6 +319,8 @@ void SessionServer::Respond(HSteamNetConnection client, nlohmann::json& msg) {
 }
 
 void SessionServer::BroadcastMessage(nlohmann::json& msg) {
+	// XXX (adanducci) replace SendMessageToConnection with SendMessages for
+	// peformance gains, but ensuring low-copy with it is annoyingly difficult.
 	std::string buf = msg.dump();
 	for (auto clientIter = clients.begin(); clientIter != clients.end(); clientIter++) {
 		_interface->SendMessageToConnection(
@@ -464,12 +463,4 @@ void SessionServer::HandleResults(int loserIndex) {
 	clients.push_back(*loser);
 	clients.erase(loser);
 	_matchData.Clear();
-}
-
-void sf4e::from_json(const nlohmann::json& j, SessionServer::SessionMember& m) {
-	j.get_to(m.data);
-}
-
-void sf4e::to_json(nlohmann::json& j, const SessionServer::SessionMember& m) {
-	j = m.data;
 }

@@ -6,6 +6,7 @@
 
 namespace Game = Dimps::Game;
 using Game::GameMementoKey;
+using Game::ProgressData;
 using Game::Request;
 using Game::Sprite::Control;
 using Game::Sprite::SingleNodeControl;
@@ -48,6 +49,14 @@ void Control::Locate(HMODULE peRoot) {
 
 DWORD* Control::GetEnabled(Control* c) {
 	return (DWORD*)((unsigned int)c + 0x18);
+}
+
+ProgressData::NextBattleType* ProgressData::GetNextBattleType(ProgressData* data) {
+	return (NextBattleType*)((unsigned int)data + 0xec);
+}
+
+ProgressData::BattleTypeSettings* ProgressData::GetBattleTypeSettings(ProgressData* data) {
+	return (BattleTypeSettings*)((unsigned int)data + 0xf0);
 }
 
 int* SingleNodeControl::GetCurrentFrame(SingleNodeControl* c) {

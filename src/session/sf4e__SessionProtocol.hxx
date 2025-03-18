@@ -14,7 +14,7 @@
 
 namespace sf4e {
 	namespace SessionProtocol {
-		using Dimps::Math::FixedPoint;
+		typedef Dimps::Math::FixedPoint FixedPoint;
 
 		struct MemberData {
 			std::string name;
@@ -22,7 +22,12 @@ namespace sf4e {
 			uint16_t port;
 		};
 
-		typedef std::vector<MemberData> LobbyData;
+		struct LobbyData {
+			bool editionSelect;
+			int roundCount;
+			FixedPoint roundTime;
+			std::vector<MemberData> members;
+		};
 
 		struct MatchData {
 			MatchData();
@@ -160,6 +165,7 @@ namespace sf4e {
 		};
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MemberData, name, ip, port);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, editionSelect, roundCount, roundTime, members);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionDataUpdate, type, lobbyData, matchData);

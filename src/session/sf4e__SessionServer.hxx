@@ -8,6 +8,7 @@
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
 #include <nlohmann/json.hpp>
 
+#include "../Dimps/Dimps__Math.hxx"
 #include "sf4e__SessionProtocol.hxx"
 
 namespace sf4e {
@@ -24,7 +25,6 @@ namespace sf4e {
 
 		// Connection callbacks and message utilities
 		static SessionServer* s_pCallbackInstance;
-		static void _OnVsPreBattleTasksRegistered();
 		static void SteamNetConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t* pInfo);
 		void OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* pInfo);
 		void BroadcastMessage(nlohmann::json& msg);
@@ -39,12 +39,13 @@ namespace sf4e {
 			const SteamNetworkingIPAddr& peerAddr
 		);
 		void HandleResults(int loserSide);
-		int BroadcastLobbyData();
-		int BroadcastMatchData();
 
 	public:
 		SessionServer(
-			std::string sidecarHash
+			std::string sidecarHash,
+			bool editionSelect,
+			int roundCount,
+			Dimps::Math::FixedPoint roundTime
 		);
 		~SessionServer();
 
@@ -67,7 +68,4 @@ namespace sf4e {
 		SessionProtocol::LobbyData _lobbyData;
 		SessionProtocol::MatchData _matchData;
 	};
-
-	void from_json(const nlohmann::json& j, SessionServer::SessionMember& m);
-	void to_json(nlohmann::json& j, const SessionServer::SessionMember& p);
 }

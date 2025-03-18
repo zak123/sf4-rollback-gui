@@ -74,6 +74,7 @@ using Dimps::Eva::TaskCoreRegistry;
 using Dimps::Event::EventBase;
 using Dimps::Event::EventBaseWithEC;
 using Dimps::Event::EventController;
+using Dimps::Game::ProgressData;
 using Dimps::Game::Request;
 using Dimps::Game::Battle::Command::CommandImpl;
 using Dimps::Game::Battle::GameManager;
@@ -161,6 +162,29 @@ static Dimps::GameEvents::VsMode::ConfirmedCharaConditions mainMenuJumpCharaCond
 static int mainMenuJumpCharaCount = 2;
 static int mainMenuJumpStageID = 0;
 static std::deque<std::string> clientAlerts;
+
+// Yes, this is correct- SF4's menu uses the fractional section of the fixed
+// point values 
+static const std::pair<int, const char* const> roundCountList[4] = {
+	{1, "1"},
+	{3, "3"},
+	{5, "5"},
+	{7, "7"}
+};
+
+static const std::pair<FixedPoint, const char* const> roundTimeList[3] = {
+	{{0, 30}, "30"},
+	{{0, 60}, "60"},
+	{{0, 99}, "99"},
+};
+
+const char* GetRoundCountLabel(void* options, int idx) {
+	return ((std::pair<int, const char* const>*)options)[idx].second;
+}
+
+const char* GetRoundTimeLabel(void* options, int idx) {
+	return ((std::pair<FixedPoint, const char* const>*)options)[idx].second;
+}
 
 void Overlay::OnClientError(SessionClient::ErrorType errType, SessionClient* const client, const SessionClient::Callbacks& callbacks) {
 	switch (errType) {
@@ -819,6 +843,9 @@ void DrawHashOverlay() {
 
 void DrawMainMenuWindow(bool* pOpen) {
 	static BYTE skipStep = 1;
+	static bool bEditionSelect = true;
+	static int roundCountIdx = 1;
+	static int roundTimeIdx = 2;
 
 	Begin(
 		"MainMenu",
@@ -843,6 +870,9 @@ void DrawMainMenuWindow(bool* pOpen) {
 	Text("Name: %s", EventBase::GetName(mainMenu));
 	ImGui::Checkbox("VS mode: Skip chara/stage select?", &mainMenuShouldJump);
 	if (mainMenuShouldJump) {
+		ImGui::Combo("Round count", &roundCountIdx, GetRoundCountLabel, (void*)roundCountList, 4);
+		ImGui::Combo("Round time", &roundTimeIdx, GetRoundTimeLabel, (void*)roundTimeList, 3);
+		ImGui::Checkbox("Edition select", &bEditionSelect);
 		ImGui::Combo("Stage", &mainMenuJumpStageID, Dimps::stageNames, 30);
 		if (BeginTable("Main Menu", 3)) {
 			TableSetupColumn("Property");
@@ -892,6 +922,14 @@ void DrawMainMenuWindow(bool* pOpen) {
 	}
 	if (Button("Go to versus mode")) {
 		if (mainMenuShouldJump) {
+			RootEvent* root = App::GetRootEvent();
+			ProgressData* progressData = *RootEvent::GetProgressData(root);
+			ProgressData::BattleTypeSettings* BattleTypeSettings = &(ProgressData::GetBattleTypeSettings(progressData)[ProgressData::NBT_PVP]);
+			*ProgressData::GetNextBattleType(progressData) = ProgressData::NBT_PVP;
+
+			BattleTypeSettings->editionSelect = bEditionSelect;
+			BattleTypeSettings->rounds = roundCountList[roundCountIdx].first;
+			BattleTypeSettings->timeLimit = roundTimeList[roundTimeIdx].first;
 			fVsPreBattle::bSkipToVersus = true;
 			fVsPreBattle::OnTasksRegistered = _OnPreBattleTasksRegistered;
 
@@ -962,6 +1000,9 @@ void DrawNetworkHostPanel(uint8_t deviceIdx, uint8_t deviceType) {
 	static char name[32] = { 0 };
 	static uint16 hostPort = 23456;
 	static uint16 ggpoPort = 23457;
+	static int roundCountIdx = 1;
+	static int roundTimeIdx = 2;
+	static bool bEditionSelect = true;
 
 	char* mainMenuQuery[1] = { "MainMenu" };
 	rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), mainMenuQuery, 1);
@@ -976,6 +1017,10 @@ void DrawNetworkHostPanel(uint8_t deviceIdx, uint8_t deviceType) {
 	ImGui::InputScalar("Session host port", ImGuiDataType_U16, &hostPort);
 	ImGui::InputScalar("GGPO port", ImGuiDataType_U16, &ggpoPort);
 	ImGui::InputText("Name", name, 32);
+	Separator();
+	ImGui::Combo("Round cound", &roundCountIdx, GetRoundCountLabel, (void*)roundCountList, 4);
+	ImGui::Combo("Round time", &roundTimeIdx, GetRoundTimeLabel, (void*)roundTimeList, 3);
+	ImGui::Checkbox("Edition select", &bEditionSelect);
 
 	bool valid = true;
 	if (hostPort == ggpoPort) {
@@ -987,7 +1032,7 @@ void DrawNetworkHostPanel(uint8_t deviceIdx, uint8_t deviceType) {
 	if (Button("Start hosting")) {
 		char hostAddr[64];
 		snprintf(hostAddr, 64, "127.0.0.1:%d", hostPort);
-		fUserApp::StartServer(hostPort, sf4e::sidecarHash);
+		fUserApp::StartServer(hostPort, sf4e::sidecarHash, bEditionSelect, roundCountList[roundCountIdx].first, roundTimeList[roundTimeIdx].first);
 		fUserApp::StartSession(hostAddr, ggpoPort, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
 	}
 	ImGui::EndDisabled();
@@ -1004,24 +1049,27 @@ void DrawNetworkLobbyPanel() {
 
 	int isSelfActiveSide = -1;
 	// List the members
-	sf4e::SessionProtocol::LobbyData& lobbyData = fUserApp::session->client._lobbyData;
-	for (int i = 0; i < 2 && i < lobbyData.size(); i++) {
+	Text("Round count: %d", fUserApp::session->client._lobbyData.roundCount);
+	Text("Round time: %d", fUserApp::session->client._lobbyData.roundTime.integral);
+	Text("Edition select: %d", fUserApp::session->client._lobbyData.editionSelect);
+	std::vector<sf4e::SessionProtocol::MemberData>& members = fUserApp::session->client._lobbyData.members;
+	for (int i = 0; i < 2 && i < members.size(); i++) {
 		const char* label = i == 0 ? "P1" : "P2";
 		Text(
 			"%s: %s (%s)",
 			label,
-			lobbyData[i].name.c_str(),
+			members[i].name.c_str(),
 			fUserApp::session->client._matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
 		);
-		if (lobbyData[i].name == fUserApp::session->client._name) {
+		if (members[i].name == fUserApp::session->client._name) {
 			isSelfActiveSide = i;
 		}
 	}
 	Separator();
 	Text("Queue:");
-	if (lobbyData.size() > 2) {
-		for (int i = 2; i < lobbyData.size(); i++) {
-			Text(lobbyData[i].name.c_str());
+	if (members.size() > 2) {
+		for (int i = 2; i < members.size(); i++) {
+			Text(members[i].name.c_str());
 		}
 	}
 	else {

@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include "../Dimps/Dimps__GameEvents.hxx"
+#include "../Dimps/Dimps__Math.hxx"
 #include "../Dimps/Dimps__UserApp.hxx"
 #include "../session/sf4e__SessionClient.hxx"
 #include "../session/sf4e__SessionServer.hxx"
@@ -36,7 +37,7 @@ namespace sf4e {
         static void Install();
         static void Steam_PostUpdate();
         static void StartSession(char* joinAddr, uint16_t port, std::string& sidecarHash, std::string& name, uint8_t deviceType, uint8_t deviceIdx, uint8_t delay);
-        static void StartServer(uint16 hostPort, std::string& sidecarHash);
+        static void StartServer(uint16 hostPort, std::string& sidecarHash, bool editionSelect, int roundCount, Dimps::Math::FixedPoint roundTime);
         static void _OnVsPreBattleTasksRegistered();
         static void _OnVsBattleTasksRegistered();
     };

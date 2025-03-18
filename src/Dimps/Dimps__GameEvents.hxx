@@ -38,7 +38,7 @@ namespace Dimps {
 
 		struct RootEvent : Dimps::Event::EventBaseWithEC {
 			static char** eventFlowDefinition;
-
+			static Game::ProgressData** GetProgressData(RootEvent* e);
 			static void Locate(HMODULE peRoot);
 		};
 

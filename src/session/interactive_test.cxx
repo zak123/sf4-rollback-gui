@@ -170,20 +170,20 @@ struct AppInstance {
                 DrawCharaConditionText(c._matchData, i);
             }
 
-            for (int i = 0; i < 2 && i < c._lobbyData.size(); i++) {
+            for (int i = 0; i < 2 && i < c._lobbyData.members.size(); i++) {
                 const char* label = i == 0 ? "P1" : "P2";
                 Text(
                     "%s: %s (%s)",
                     label,
-                    c._lobbyData[i].name.c_str(),
+                    c._lobbyData.members[i].name.c_str(),
                     c._matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
                 );
             }
             Separator();
             Text("Queue:");
-            if (c._lobbyData.size() > 2) {
-                for (int i = 2; i < c._lobbyData.size(); i++) {
-                    Text(c._lobbyData[i].name.c_str());
+            if (c._lobbyData.members.size() > 2) {
+                for (int i = 2; i < c._lobbyData.members.size(); i++) {
+                    Text(c._lobbyData.members[i].name.c_str());
                 }
             }
             else {
@@ -325,7 +325,8 @@ int main(int, char**)
     if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
         spdlog::error("GameNetworkingSockets_Init failed.  {}", errMsg);
     }
-    g_server.reset(new SessionServer(std::string("123")));
+    sf4e::SessionProtocol::FixedPoint stubRoundTime = { 0, 99 };
+    g_server.reset(new SessionServer(std::string("123"), false, 3, stubRoundTime));
 
     ImGui_ImplWin32_EnableDpiAwareness();
     WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"sf4e session interactive tests", nullptr };

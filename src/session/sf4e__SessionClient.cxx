@@ -206,8 +206,8 @@ int SessionClient::Step()
 			_matchData = update.matchData;
 
 			if (_outstandingReadyRequestNumber > -1) {
-				for (int i = 0; i < _lobbyData.size() && i < 2; i++) {
-					if (_lobbyData[i].name == _name) {
+				for (int i = 0; i < _lobbyData.members.size() && i < 2; i++) {
+					if (_lobbyData.members[i].name == _name) {
 						if (_matchData.readyMessageNum[i] == _outstandingReadyRequestNumber) {
 							// This contains the ready data, so there's no longer an outstanding request.
 							_outstandingReadyRequestNumber = -1;
