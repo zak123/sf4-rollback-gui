@@ -28,6 +28,7 @@ namespace sf4e {
 			void* data;
 			void (*OnError)(ErrorType errorType, SessionClient* const client, const Callbacks& callbacks);
 			void (*OnReady)(SessionClient* const client, const Callbacks& callbacks);
+			void (*OnBattleSynced)(SessionClient* const client, const Callbacks& callbacks);
 		};
 
 		SessionClient(
@@ -57,6 +58,8 @@ namespace sf4e {
 		EResult PreBattle_SetEnv(uint32_t rngSeed);
 		EResult PreBattle_SetChara(const Dimps::GameEvents::VsMode::ConfirmedCharaConditions& chara);
 		EResult PreBattle_SetStage(int32_t stageID);
+
+		EResult Battle_Loaded();
 
 		// Public for testing
 		EResult Send(nlohmann::json& msg, int64_t* outMessageNum);

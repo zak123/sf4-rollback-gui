@@ -212,10 +212,15 @@ void OnReady(sf4e::SessionClient* const client, const sf4e::SessionClient::Callb
     (rMainMenu::ToItemObserver(mainMenu)->*rMainMenu::itemObserverMethods.GoToVersusMode)();
 }
 
+void OnBattleSynced(SessionClient* const client, const sf4e::SessionClient::Callbacks& callbacks) {
+    fVsBattle::bSessionSynced = true;
+}
+
 sf4e::SessionClient::Callbacks clientCallbacks = {
     nullptr,
     sf4e::Overlay::OnClientError,
-    OnReady
+    OnReady,
+    OnBattleSynced,
 };
 
 void fUserApp::Install() {

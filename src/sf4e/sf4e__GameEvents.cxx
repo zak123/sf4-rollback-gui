@@ -8,6 +8,7 @@
 #include "../Dimps/Dimps__Platform.hxx"
 #include "sf4e__Event.hxx"
 #include "sf4e__GameEvents.hxx"
+#include "sf4e__UserApp.hxx"
 
 using Dimps::Game::Request;
 
@@ -29,6 +30,7 @@ using fRootEvent = fGameEvents::RootEvent;
 using fVsBattle = fGameEvents::VsBattle;
 using fVsPreBattle = fGameEvents::VsPreBattle;
 using fVsStageSelect = fGameEvents::VsStageSelect;
+using fUserApp = sf4e::UserApp;
 
 int (*fMainMenu::OnModeSelectedOverride)(int mode);
 int fMainMenu::bOverrideItemObserverState = -1;
@@ -38,6 +40,8 @@ void (*fVsPreBattle::OnTasksRegistered)() = nullptr;
 bool fVsBattle::bBlockInitialization = false;
 bool fVsBattle::bBlockTermination = false;
 bool fVsBattle::bForceNextMatchOnline = false;
+bool fVsBattle::bSessionSentLoaded = false;
+bool fVsBattle::bSessionSynced = false;
 bool fVsBattle::bOverrideNextRandomSeed = false;
 bool fVsBattle::bTerminateOnNextLeftBattle = false;
 DWORD fVsBattle::nextMatchRandomSeed = 0xffffffff;
@@ -155,6 +159,7 @@ void fVsBattle::Install() {
 	int (fVsBattle:: * _fHasInitialized)() = &HasInitialized;
 	void (fVsBattle:: * _fPrepareBattleRequest)() = &PrepareBattleRequest;
 	void (fVsBattle:: * _fRegisterTasks)() = &RegisterTasks;
+	void (fVsBattle:: * _fExitForeground)() = &ExitForeground;
 
 	DetourAttach(
 		(PVOID*)&rVsBattle::privateMethods.CheckAndMaybeExitBasedOnExitType,
@@ -171,6 +176,10 @@ void fVsBattle::Install() {
 	DetourAttach(
 		(PVOID*)&rVsBattle::publicMethods.RegisterTasks,
 		*(PVOID*)&_fRegisterTasks
+	);
+	DetourAttach(
+		(PVOID*)&rVsBattle::publicMethods.ExitForeground,
+		*(PVOID*)&_fExitForeground
 	);
 
 	DWORD dwOld = 0;
@@ -210,7 +219,20 @@ int fVsBattle::HasInitialized() {
 
 	// The real system has initialized, but we may want to intentionally
 	// delay.
-	return !bBlockInitialization;
+	if (bBlockInitialization) {
+		return 0;
+	}
+	if (fUserApp::session) {
+		if (!bSessionSentLoaded) {
+			bSessionSentLoaded = true;
+			fUserApp::session->client.Battle_Loaded();
+		}
+		if (!bSessionSynced) {
+			return 0;
+		}
+	}
+
+	return 1;
 }
 
 BOOL fVsBattle::IsTerminationComplete() {
@@ -248,6 +270,16 @@ void fVsBattle::RegisterTasks() {
 		OnTasksRegistered();
 		OnTasksRegistered = nullptr;
 	}
+}
+
+void fVsBattle::ExitForeground() {
+	rVsBattle* _this = (rVsBattle*)this;
+	(_this->*rVsBattle::publicMethods.ExitForeground)();
+	if (fUserApp::server) {
+		fUserApp::server->ResetBattleSync();
+	}
+	bSessionSentLoaded = false;
+	bSessionSynced = false;
 }
 
 void fVsPreBattle::Install() {

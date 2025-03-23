@@ -33,8 +33,11 @@ namespace sf4e {
 			BOOL IsTerminationComplete();
 			void PrepareBattleRequest();
 			void RegisterTasks();
+			void ExitForeground();
 
 			static void (*OnTasksRegistered)();
+			static bool bSessionSentLoaded;
+			static bool bSessionSynced;
 			static bool bBlockInitialization;
 			static bool bBlockTermination;
 			static bool bForceNextMatchOnline;

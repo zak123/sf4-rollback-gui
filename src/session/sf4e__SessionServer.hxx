@@ -54,6 +54,7 @@ namespace sf4e {
 		int Step();
 		int Close();
 		void PrepareForCallbacks();
+		void ResetBattleSync();
 
 		typedef struct SessionMember {
 			SessionProtocol::MemberData data;

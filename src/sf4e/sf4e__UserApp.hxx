@@ -5,7 +5,6 @@
 
 #include <windows.h>
 
-#include "../Dimps/Dimps__GameEvents.hxx"
 #include "../Dimps/Dimps__Math.hxx"
 #include "../Dimps/Dimps__UserApp.hxx"
 #include "../session/sf4e__SessionClient.hxx"

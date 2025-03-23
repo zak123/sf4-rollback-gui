@@ -16,10 +16,15 @@ namespace sf4e {
 	namespace SessionProtocol {
 		typedef Dimps::Math::FixedPoint FixedPoint;
 
+		enum MemberFlags {
+			MF_BATTLE_LOADED = 1,
+		};
+
 		struct MemberData {
 			std::string name;
 			std::string ip;
 			uint16_t port;
+			int64_t flags;
 		};
 
 		struct LobbyData {
@@ -53,6 +58,8 @@ namespace sf4e {
 			MT_PREBATTLE_SETCHARA,
 			MT_PREBATTLE_SETSTAGE,
 
+			MT_BATTLE_LOADED,
+			MT_BATTLE_SYNCED,
 			MT_BATTLE_SNAPSHOT,
 		};
 
@@ -69,6 +76,8 @@ namespace sf4e {
 			{MT_PREBATTLE_SETCHARA, "prebattle_setchara"},
 			{MT_PREBATTLE_SETSTAGE, "prebattle_setstage"},
 
+			{MT_BATTLE_LOADED, "battle_loaded"},
+			{MT_BATTLE_SYNCED, "battle_synced"},
 			{MT_BATTLE_SNAPSHOT, "battle_snapshot"},
 		})
 
@@ -134,6 +143,14 @@ namespace sf4e {
 			int32_t stageID;
 		};
 
+		struct BattleLoaded {
+			MessageType type = MT_BATTLE_LOADED;
+		};
+
+		struct BattleSynced {
+			MessageType type = MT_BATTLE_SYNCED;
+		};
+
 		struct StateSnapshot {
 			struct CharaStateSnapshot {
 				int status;
@@ -183,5 +200,7 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(StateSnapshot::CharaStateSnapshot, status, rootPos, side, vit, vitmax, revenge, revengemax, recoverable, recoverablemax, super, supermax, sctimeamt, sctimemax, uctime, uctimemax, damage, combodamage);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(StateSnapshot, frameIdx, chara);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleSnapshot, type, snapshot);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleLoaded, type);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleSynced, type);
 	}
 }

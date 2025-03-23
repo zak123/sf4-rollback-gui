@@ -155,6 +155,7 @@ namespace Dimps {
 			typedef struct __publicMethods {
 				int (VsBattle::* HasInitialized)();
 				void(VsBattle::* RegisterTasks)();
+				void(VsBattle::* ExitForeground)();
 			} __publicMethods;
 
 			static __privateMethods privateMethods;

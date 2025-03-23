@@ -96,7 +96,8 @@ int SessionServer::Step()
 {
 	ISteamNetworkingMessage* pIncomingMsgs[SESSION_SERVER_MAX_MESSAGES_PER_POLL] = { 0 };
 	int numMsgs = _interface->ReceiveMessagesOnPollGroup(_pollGroup, pIncomingMsgs, SESSION_SERVER_MAX_MESSAGES_PER_POLL);
-	bool bSendAllReady = false;
+	bool bSendLobbyAllReady = false;
+	bool bSendBattleSynced = false;
 
 	if (numMsgs < 0) {
 		spdlog::error("Session server error checking for messages: {}", numMsgs);
@@ -230,6 +231,16 @@ int SessionServer::Step()
 			_matchData.stageID = request.stageID;
 			_dataDirty = true;
 		}
+		else if (type == SessionProtocol::MT_BATTLE_LOADED) {
+			bSendBattleSynced = true;
+			for (int i = 0; i < clients.size(); i++) {
+				if (clients.at(i).conn == conn) {
+					clients.at(i).data.flags |= SessionProtocol::MF_BATTLE_LOADED;
+				}
+				bSendBattleSynced = bSendBattleSynced && (clients.at(i).data.flags & SessionProtocol::MF_BATTLE_LOADED);
+			}
+			_dataDirty = true;
+		}
 		else if (type == SessionProtocol::MT_LOBBY_READY) {
 			int side = -1;
 			for (int i = 0; i < 2; i++) {
@@ -252,7 +263,7 @@ int SessionServer::Step()
 				continue;
 			}
 			_matchData.readyMessageNum[side] = pIncomingMsg->GetMessageNumber();
-			bSendAllReady = bSendAllReady || _matchData.IsAllReady();
+			bSendLobbyAllReady = bSendLobbyAllReady || _matchData.IsAllReady();
 			_dataDirty = true;
 		}
 		else if (type == SessionProtocol::MT_LOBBY_REPORTRESULTS) {
@@ -303,8 +314,12 @@ int SessionServer::Step()
 		_dataDirty = false;
 	}
 
-	if (bSendAllReady) {
+	if (bSendLobbyAllReady) {
 		BroadcastMessage(json(SessionProtocol::LobbyAllReady()));
+	}
+
+	if (bSendBattleSynced) {
+		BroadcastMessage(json(SessionProtocol::BattleSynced()));
 	}
 
 	return 0;
@@ -352,6 +367,13 @@ int SessionServer::Close()
 void SessionServer::PrepareForCallbacks()
 {
 	s_pCallbackInstance = this;
+}
+
+void SessionServer::ResetBattleSync()
+{
+	for (int i = 0; i < clients.size(); i++) {
+		clients.at(i).data.flags &= (~SessionProtocol::MF_BATTLE_LOADED);
+	}
 }
 
 void SessionServer::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* pInfo)

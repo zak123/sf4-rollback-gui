@@ -225,6 +225,11 @@ struct AppInstance {
         AppInstance* app = (AppInstance*)callbacks.data;
         app->alerts.push_back("Ready!");
     }
+
+    static void OnBattleSynced(SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+        AppInstance* app = (AppInstance*)callbacks.data;
+        app->alerts.push_back("Synced!");
+    }
 };
 
 static std::unique_ptr<SessionServer> g_server;
@@ -246,10 +251,11 @@ void DrawServerSessionInfo(const std::vector<SessionServer::SessionMember>& clie
     for (int i = 0; i < 2 && i < clients.size(); i++) {
         const char* label = i == 0 ? "P1" : "P2";
         Text(
-            "%s: %s (%s)",
+            "%s: %s (%s) %x",
             label,
             clients[i].data.name.c_str(),
-            matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
+            matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting",
+            clients[i].data.flags
         );
     }
     Separator();
@@ -294,6 +300,9 @@ int DrawServerWindow() {
             g_instances.back().c.Connect(pOutConnection2);
             nNextClientID++;
             nNextGgpoPort++;
+        }
+        if (Button("Reeset battle sync")) {
+            g_server->ResetBattleSync();
         }
     }
     else {

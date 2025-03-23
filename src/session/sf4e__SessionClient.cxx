@@ -220,6 +220,9 @@ int SessionClient::Step()
 		else if (type == SessionProtocol::MT_LOBBY_ALLREADY) {
 			_callbacks.OnReady(this, _callbacks);
 		}
+		else if (type == SessionProtocol::MT_BATTLE_SYNCED) {
+			_callbacks.OnBattleSynced(this, _callbacks);
+		}
 		else if (type == SessionProtocol::MT_BATTLE_SNAPSHOT) {
 			SessionProtocol::BattleSnapshot m;
 			try {
@@ -419,6 +422,17 @@ EResult SessionClient::PreBattle_SetStage(int32_t stageID)
 	EResult result = Send(j, nullptr);
 	if (result != k_EResultOK) {
 		spdlog::warn("Client: could not set prebattle stage! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Battle_Loaded()
+{
+	SessionProtocol::BattleLoaded msg;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not set battle loaded! Result: {}", (int)result);
 	}
 	return result;
 }
