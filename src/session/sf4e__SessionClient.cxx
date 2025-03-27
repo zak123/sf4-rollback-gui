@@ -27,6 +27,7 @@ using sf4e::SessionProtocol::LobbyReady;
 
 const int sf4e::SESSION_CLIENT_MAX_MESSAGES_PER_POLL = 20;
 SessionClient* SessionClient::s_pCallbackInstance;
+bool SessionClient::bVerboseLogging = false;
 
 SessionClient::SessionClient(
 	const Callbacks& callbacks,
@@ -238,18 +239,34 @@ int SessionClient::Step()
 				// This client is ahead and already has a snapshot for this frame.
 				// Compare it.
 				SessionProtocol::StateSnapshot& localSnapshot = localSnapshotIter->second.first;
+				if (bVerboseLogging) {
+					spdlog::error("Client: snapshot receipt: valid snapshot @ frame {} on receipt, confirm {}, sent {}", localSnapshot.frameIdx, localSnapshotIter->second.second.confirmed, localSnapshotIter->second.second.sent);
+				}
 				if (memcmp(&m.snapshot, &localSnapshot, sizeof(SessionProtocol::StateSnapshot)) != 0) {
-					spdlog::error("Client: Desync detected!");
-					MessageBoxA(NULL, "Desync detected!", NULL, MB_OK);
+					if (bVerboseLogging) {
+						spdlog::error("Client: snapshot receipt: Desync detected!");
+					}
+					MessageBoxA(NULL, "Client: snapshot receipt: Desync detected!", NULL, MB_OK);
 					*rSystem::GetReadyState(rSystem::staticMethods.GetSingleton()) = rSystem::RS_ISLEAVING;
+				}
+
+				if (bVerboseLogging) {
+					spdlog::error("    - Client: snapshot receipt: valid snapshot @ frame {} on receipt confirmed", localSnapshot.frameIdx);
 				}
 				localSnapshotIter->second.second.confirmed = true;
 				if (localSnapshotIter->second.second.confirmed && localSnapshotIter->second.second.sent) {
+
+					if (bVerboseLogging) {
+						spdlog::error("Client: snapshot receipt: erasing local snapshot @ frame {} on receipt due to confirmation+sent", m.snapshot.frameIdx);
+					}
 					fSystem::snapshotMap.erase(localSnapshotIter);
 				}
 			}
 			else {
 				// Opponent's ahead- can't compare yet.
+				if (bVerboseLogging) {
+					spdlog::error("Client: snapshot receipt: pendingRemoteSnapshots.emplace({})", m.snapshot.frameIdx);
+				}
 				pendingRemoteSnapshots.emplace(m.snapshot.frameIdx, m.snapshot);
 			}
 		}
@@ -272,7 +289,14 @@ int SessionClient::Step()
 				continue;
 			}
 
+			if (bVerboseLogging) {
+				spdlog::error("Client: snapshot reconciliation: checking snapshot @ {} due to mostRecentPredictiveFrame {}", localSnapshotIter->first, mostRecentPredictiveFrame);
+			}
+
 			if (!localSnapshotIter->second.second.sent) {
+				if (bVerboseLogging) {
+					spdlog::error("Client: snapshot reconciliation: snapshot @ {} not yet sent, confirmed val: {}", localSnapshotIter->first, localSnapshotIter->second.second.confirmed);
+				}
 				// Snapshot not yet sent. Send it.
 				localSnapshotIter->second.second.sent = true;
 				SessionProtocol::BattleSnapshot m;
@@ -284,13 +308,19 @@ int SessionClient::Step()
 			}
 
 			if (!localSnapshotIter->second.second.confirmed) {
+				if (bVerboseLogging) {
+					spdlog::error("Client: snapshot reconciliation: snapshot @ {} not yet confirmed, sent val: {}", localSnapshotIter->first, localSnapshotIter->second.second.sent);
+				}
 				auto remoteSnapshotIter = pendingRemoteSnapshots.find(localSnapshotIter->first);
 				if (remoteSnapshotIter != pendingRemoteSnapshots.end()) {
+					if (bVerboseLogging) {
+						spdlog::error("   - Client: snapshot reconciliation: snapshot @ {} got candidate remote snapshot", localSnapshotIter->first);
+					}
 					// Caught up to the opponent- compare to a snapshot already sent by the opponent.
 					SessionProtocol::StateSnapshot& localSnapshot = localSnapshotIter->second.first;
 					if (memcmp(&remoteSnapshotIter->second, &localSnapshot, sizeof(SessionProtocol::StateSnapshot)) != 0) {
-						spdlog::error("Client: Desync detected!");
-						MessageBoxA(NULL, "Desync detected!", NULL, MB_OK);
+						spdlog::error("Client: snapshot reconciliation: Desync detected from pending!");
+						MessageBoxA(NULL, "Client: snapshot reconciliation: Desync detected from pending!", NULL, MB_OK); // This tends to be where the issue occurs- how?!
 						*rSystem::GetReadyState(rSystem::staticMethods.GetSingleton()) = rSystem::RS_ISLEAVING;
 					}
 					localSnapshotIter->second.second.confirmed = true;
@@ -298,6 +328,9 @@ int SessionClient::Step()
 			}
 
 			if (localSnapshotIter->second.second.confirmed && localSnapshotIter->second.second.sent) {
+				if (bVerboseLogging) {
+					spdlog::error("   - Client: snapshot reconciliation: snapshot @ {} erased due to being confirmed and sent", localSnapshotIter->first);
+				}
 				localSnapshotIter = fSystem::snapshotMap.erase(localSnapshotIter);
 			}
 			else {

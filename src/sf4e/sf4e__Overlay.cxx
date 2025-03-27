@@ -188,16 +188,16 @@ const char* GetRoundTimeLabel(void* options, int idx) {
 
 void Overlay::OnClientError(SessionClient::ErrorType errType, SessionClient* const client, const SessionClient::Callbacks& callbacks) {
 	switch (errType) {
-	case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_HASH_INVALID:
+	case SessionClient::ErrorType::SCE_JOIN_REJECTED_HASH_INVALID:
 		clientAlerts.push_back("Could not join lobby: version mismatch");
 		break;
-	case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_LOBBY_FULL:
+	case SessionClient::ErrorType::SCE_JOIN_REJECTED_LOBBY_FULL:
 		clientAlerts.push_back("Could not join lobby: lobby full");
 		break;
-	case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_NAME_TAKEN:
+	case SessionClient::ErrorType::SCE_JOIN_REJECTED_NAME_TAKEN:
 		clientAlerts.push_back("Could not join lobby: name taken");
 		break;
-	case sf4e::SessionClient::ErrorType::SCE_JOIN_REJECTED_REQUEST_INVALID:
+	case SessionClient::ErrorType::SCE_JOIN_REJECTED_REQUEST_INVALID:
 		clientAlerts.push_back("Could not join lobby: join request incorrectly formatted- version mismatch?");
 		break;
 	default:
@@ -759,28 +759,14 @@ void DrawGFxAppWindow(bool* pOpen) {
 void DrawGGPOStatsOverlay(GGPOSession* ggpo, fSystem::PlayerConnectionInfo* players) {
 	GGPONetworkStats stats;
 	int i;
-	for (i = 0; i < MAX_SF4E_PROTOCOL_USERS; i++) {
-		if (players[i].type == GGPO_PLAYERTYPE_REMOTE) {
-			break;
-		}
-	}
-	if (i == MAX_SF4E_PROTOCOL_USERS) {
-		// No remote player
-		return;
-	}
-
-	GGPOErrorCode err = ggpo_get_network_stats(ggpo, players[i].handle, &stats);
-	if (!GGPO_SUCCEEDED(err)) {
-		spdlog::warn("Couldn't get GGPO stats for overlay: {}", (int)err);
-		return;
-	}
 
 	ImGuiIO& io = ImGui::GetIO();
-	ImVec2 size(300, 50);
+	ImVec2 size(500, 50);
 	ImVec2 window_pos(
 		(io.DisplaySize.x - size.x) / 2,
 		io.DisplaySize.y - size.y - 20
 	);
+
 	ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always);
 	ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 	ImGui::SetNextWindowBgAlpha(0.35f);
@@ -795,22 +781,61 @@ void DrawGGPOStatsOverlay(GGPOSession* ggpo, fSystem::PlayerConnectionInfo* play
 		ImGuiWindowFlags_NoBringToFrontOnFocus |
 		ImGuiWindowFlags_NoInputs
 	);
+ 
+	for (i = 0; i < MAX_SF4E_PROTOCOL_USERS; i++) {
+		if (players[i].type == GGPO_PLAYERTYPE_REMOTE) {
+			break;
+		}
+	}
+	if (i == MAX_SF4E_PROTOCOL_USERS) {
+		// No remote player
+		Columns(2);
+		Text("len(PndSnaps)"); NextColumn();
+		Text("len(snapMap)"); NextColumn();
+		if (fUserApp::session) {
 
-	Columns(6);
-	Text("RTT ms"); NextColumn();
-	Text("kbps"); NextColumn();
-	Text("recv"); NextColumn();
-	Text("send"); NextColumn();
-	Text("LFB"); NextColumn();
-	Text("RFB"); NextColumn();
+			Text("%d", fUserApp::session->client.pendingRemoteSnapshots.size()); NextColumn();
+		}
+		else {
+			Text("N/A"); NextColumn();
+		}
+		Text("%d", fSystem::snapshotMap.size());  NextColumn();
+		Columns(1);
+		return;
+	}
+	else {
+		GGPOErrorCode err = ggpo_get_network_stats(ggpo, players[i].handle, &stats);
+		if (!GGPO_SUCCEEDED(err)) {
+			spdlog::warn("Couldn't get GGPO stats for overlay: {}", (int)err);
+			return;
+		}
 
-	Text("%d", stats.network.ping); NextColumn();
-	Text("%d", stats.network.kbps_sent);  NextColumn();
-	Text("%d", stats.network.recv_queue_len);  NextColumn();
-	Text("%d", stats.network.send_queue_len);  NextColumn();
-	Text("%d", stats.timesync.local_frames_behind);  NextColumn();
-	Text("%d", stats.timesync.remote_frames_behind);  NextColumn();
-	Columns(1);
+		Columns(8);
+		Text("RTT ms"); NextColumn();
+		Text("kbps"); NextColumn();
+		Text("recv"); NextColumn();
+		Text("send"); NextColumn();
+		Text("LFB"); NextColumn();
+		Text("RFB"); NextColumn();
+		Text("len(PndSnaps)"); NextColumn();
+		Text("len(snapMap)"); NextColumn();
+
+		Text("%d", stats.network.ping); NextColumn();
+		Text("%d", stats.network.kbps_sent);  NextColumn();
+		Text("%d", stats.network.recv_queue_len);  NextColumn();
+		Text("%d", stats.network.send_queue_len);  NextColumn();
+		Text("%d", stats.timesync.local_frames_behind);  NextColumn();
+		Text("%d", stats.timesync.remote_frames_behind);  NextColumn();
+		if (fUserApp::session) {
+
+			Text("%d", fUserApp::session->client.pendingRemoteSnapshots.size()); NextColumn();
+		}
+		else {
+			Text("N/A"); NextColumn();
+		}
+		Text("%d", fSystem::snapshotMap.size());  NextColumn();
+		Columns(1);
+	}
 
 	End();
 }
@@ -1048,6 +1073,9 @@ void DrawNetworkLobbyPanel() {
 	}
 
 	int isSelfActiveSide = -1;
+	ImGui::Checkbox("Verbose logging?", &sf4e::SessionClient::bVerboseLogging);
+	Separator();
+
 	// List the members
 	Text("Round count: %d", fUserApp::session->client._lobbyData.roundCount);
 	Text("Round time: %d", fUserApp::session->client._lobbyData.roundTime.integral);

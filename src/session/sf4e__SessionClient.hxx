@@ -16,6 +16,8 @@ namespace sf4e {
 	{
 
 	public:
+		static bool bVerboseLogging;
+
 		enum ErrorType {
 			SCE_UNKNOWN,
 			SCE_JOIN_REJECTED_HASH_INVALID,
@@ -68,6 +70,7 @@ namespace sf4e {
 		std::string _sidecarHash;
 		uint16_t _ggpoPort;
 		SteamNetworkingIPAddr _serverAddr;
+		std::map<int, SessionProtocol::StateSnapshot> pendingRemoteSnapshots;
 	private:
 
 		// Connection related data
@@ -76,7 +79,6 @@ namespace sf4e {
 		HSteamNetConnection _conn;
 		ISteamNetworkingSockets* _interface;
 
-		std::map<int, SessionProtocol::StateSnapshot> pendingRemoteSnapshots;
 
 		void OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* pInfo);
 
