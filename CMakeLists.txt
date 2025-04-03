@@ -117,7 +117,7 @@ target_link_libraries(
 )
 
 add_executable(SessionInteractiveTest "src/session/interactive_test.cxx")
-target_link_libraries(SessionInteractiveTest PRIVATE nlohmann_json::nlohmann_json imgui::imgui spdlog::spdlog Dimps sf4e Session Overlay "d3d9")
+target_link_libraries(SessionInteractiveTest PRIVATE nlohmann_json::nlohmann_json imgui::imgui spdlog::spdlog Dimps sf4e Session "d3d9")
 # target_link_options(SessionInteractiveTest PRIVATE "/entry:wWinMainCRTStartup")
 
 add_executable(Launcher WIN32 src/launcher/launcher.cxx)

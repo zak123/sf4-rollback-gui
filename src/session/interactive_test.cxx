@@ -78,7 +78,7 @@ struct AppInstance {
         uint16_t ggpoPort,
         std::string& name
     ) : 
-        callbacks{ this, OnError, OnReady },
+        callbacks{ this, OnError, OnReady, OnBattleSynced },
         c(
             callbacks,
             sidecarHash,
@@ -104,6 +104,12 @@ struct AppInstance {
 
     void Update() {
         c.Step();
+    }
+
+    void DrawBattleLoadedForm() {
+        if (Button("Send battle loaded")) {
+            c.Battle_Loaded();
+        }
     }
 
     void DrawSetConditionsForm() {
@@ -191,6 +197,8 @@ struct AppInstance {
             }
             Separator();
             DrawSetConditionsForm();
+            Separator();
+            DrawBattleLoadedForm();
             Separator();
             DrawResultsForm();
             Separator();
