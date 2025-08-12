@@ -17,6 +17,17 @@ namespace sf4e {
 	class SessionServer
 	{
 	private:
+		// A binary blob usable by any host for routing messages to this
+		// server. This is most likely an IP address and port, a hostname
+		// and port, or in extreme cases an overlay network's concept of
+		// addressing (ex. an index in a service discovery protocol).
+		// Identities of clients connected to the server are prefixed with
+		// this identity. This allows all servers in a cluster to forward
+		// messages to any user connected to any server in the cluster-
+		// just send it to the prefixed identity, and that host will take
+		// care of the rest.
+		std::string _identity;
+
 		// Connection related data
 		std::string _sidecarHash;
 		HSteamListenSocket _listenSock;
@@ -42,6 +53,7 @@ namespace sf4e {
 
 	public:
 		SessionServer(
+			std::string identity,
 			std::string sidecarHash,
 			bool editionSelect,
 			int roundCount,

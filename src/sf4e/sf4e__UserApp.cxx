@@ -243,8 +243,8 @@ void fUserApp::StartSession(char* joinAddr, uint16_t port, std::string& sidecarH
     session->client.Connect(addr);
 }
 
-void fUserApp::StartServer(uint16 hostPort, std::string& sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) {
-    server.reset(new SessionServer(sidecarHash, editionSelect, roundCount, roundTime));
+void fUserApp::StartServer(uint16 hostPort, std::string& identity, std::string& sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) {
+    server.reset(new SessionServer(identity, sidecarHash, editionSelect, roundCount, roundTime));
     server->Listen(hostPort);
 }
 

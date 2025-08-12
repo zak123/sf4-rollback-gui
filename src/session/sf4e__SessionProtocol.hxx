@@ -21,10 +21,22 @@ namespace sf4e {
 		};
 
 		struct MemberData {
+			// Connection IDs are ephemeral and reusable- they can be used to
+			// distinguish clients from each other, but should not be used as
+			// any kind of stable identifier. Care should be taken that any
+			// references to connection IDs (including those inside client code)
+			// are released or deleted when the connection is terminated, to
+			// prevent referring to duplicate IDs.
+			std::string connId;
+
 			std::string name;
+
+			// The IP the client has connected from. While not guaranteed to
+			// be reachable, other P2P libraries (ex. GGPO) can try to leverage
+			// this to connect directly.
 			std::string ip;
 			uint16_t port;
-			int64_t flags;
+			uint64_t flags;
 		};
 
 		struct LobbyData {
@@ -181,7 +193,7 @@ namespace sf4e {
 			StateSnapshot snapshot;
 		};
 
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MemberData, name, ip, port);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MemberData, connId, name, ip, port);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, editionSelect, roundCount, roundTime, members);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed);
 

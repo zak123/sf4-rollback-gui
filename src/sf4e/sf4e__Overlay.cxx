@@ -933,7 +933,7 @@ void DrawNetworkHostPanel(uint8_t deviceIdx, uint8_t deviceType) {
 	if (Button("Start hosting")) {
 		char hostAddr[64];
 		snprintf(hostAddr, 64, "127.0.0.1:%d", hostPort);
-		fUserApp::StartServer(hostPort, sf4e::sidecarHash, bEditionSelect, roundCountList[roundCountIdx].first, roundTimeList[roundTimeIdx].first);
+		fUserApp::StartServer(hostPort, std::string("localhost/"), sf4e::sidecarHash, bEditionSelect, roundCountList[roundCountIdx].first, roundTimeList[roundTimeIdx].first);
 		fUserApp::StartSession(hostAddr, ggpoPort, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
 	}
 	ImGui::EndDisabled();
@@ -1101,7 +1101,7 @@ void DrawNetworkWindow(bool* pOpen) {
 				if (bDebug) {
 					Text("Server initialized, client map:");
 					for (auto iter = fUserApp::server->clients.begin(); iter != fUserApp::server->clients.end(); iter++) {
-						Text("%x %s", iter->conn, iter->data.name.c_str());
+						Text("%x %s %s", iter->conn, iter->data.connId.c_str(), iter->data.name.c_str());
 					}
 				}
 				if (fUserApp::session) {

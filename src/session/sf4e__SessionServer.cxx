@@ -29,7 +29,8 @@ using sf4e::SessionServer;
 const int sf4e::SESSION_SERVER_MAX_MESSAGES_PER_POLL = 200;
 SessionServer* SessionServer::s_pCallbackInstance;
 
-SessionServer::SessionServer(std::string sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) :
+SessionServer::SessionServer(std::string identity, std::string sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) :
+	_identity(identity),
 	_sidecarHash(sidecarHash),
 	_interface(SteamNetworkingSockets()),
 	_dataDirty(false),
@@ -475,7 +476,7 @@ SessionProtocol::JoinResult SessionServer::RegisterToWait(const HSteamNetConnect
 	else {
 		peerAddr.ToString(peerAddrStr, SteamNetworkingIPAddr::k_cchMaxString, false);
 	}
-	SessionMember newMember{ {name, peerAddrStr, port}, conn };
+	SessionMember newMember{ {_identity + std::to_string(conn), name, peerAddrStr, port}, conn };
 	clients.push_back(std::move(newMember));
 	return SessionProtocol::JOIN_OK;
 }
