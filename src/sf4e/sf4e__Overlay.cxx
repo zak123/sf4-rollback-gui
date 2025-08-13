@@ -952,18 +952,23 @@ void DrawNetworkLobbyPanel() {
 	ImGui::Checkbox("Verbose logging?", &sf4e::SessionClient::bVerboseLogging);
 	Separator();
 
+	Text("CID: %d", fUserApp::session->client._cid);
+
 	// List the members
-	Text("Round count: %d", fUserApp::session->client._lobbyData.roundCount);
-	Text("Round time: %d", fUserApp::session->client._lobbyData.roundTime.integral);
-	Text("Edition select: %d", fUserApp::session->client._lobbyData.editionSelect);
-	std::vector<sf4e::SessionProtocol::MemberData>& members = fUserApp::session->client._lobbyData.members;
+	sf4e::SessionClient& client = fUserApp::session->client;
+	Text("Round count: %d", client._lobbyData.roundCount);
+	Text("Round time: %d", client._lobbyData.roundTime.integral);
+	Text("Edition select: %d", client._lobbyData.editionSelect);
+	std::vector<sf4e::SessionProtocol::MemberData>& members = client._lobbyData.members;
 	for (int i = 0; i < 2 && i < members.size(); i++) {
 		const char* label = i == 0 ? "P1" : "P2";
+		const char* isMe = client._lobbyData.members[i].connId == client._cid ? " [Me] " : " ";
 		Text(
-			"%s: %s (%s)",
+			"%s: %s%s(%s)",
 			label,
 			members[i].name.c_str(),
-			fUserApp::session->client._matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
+			isMe,
+			client._matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
 		);
 		if (members[i].name == fUserApp::session->client._name) {
 			isSelfActiveSide = i;
@@ -973,7 +978,12 @@ void DrawNetworkLobbyPanel() {
 	Text("Queue:");
 	if (members.size() > 2) {
 		for (int i = 2; i < members.size(); i++) {
-			Text(members[i].name.c_str());
+			const char* isMe = client._lobbyData.members[i].connId == client._cid ? " [Me] " : " ";
+			Text(
+				"%s%s",
+				members[i].name.c_str(),
+				isMe
+			);
 		}
 	}
 	else {

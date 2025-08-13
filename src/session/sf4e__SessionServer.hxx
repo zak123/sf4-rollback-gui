@@ -47,7 +47,8 @@ namespace sf4e {
 			const uint16_t& port,
 			const std::string& sidecarHash,
 			const std::string& name,
-			const SteamNetworkingIPAddr& peerAddr
+			const SteamNetworkingIPAddr& peerAddr,
+			SessionProtocol::ConnectionID& newCid
 		);
 		void HandleResults(int loserSide);
 

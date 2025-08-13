@@ -148,7 +148,9 @@ int SessionServer::Step()
 			}
 
 			SteamNetworkingIPAddr peerAddr = *(pIncomingMsg->m_identityPeer.GetIPAddr());
-			SessionProtocol::JoinResult joinResult = RegisterToWait(conn, request.port, request.sidecarHash, request.username, peerAddr);
+			SessionProtocol::ConnectionID newCid;
+
+			SessionProtocol::JoinResult joinResult = RegisterToWait(conn, request.port, request.sidecarHash, request.username, peerAddr, newCid);
 			if (joinResult != SessionProtocol::JOIN_OK) {
 				spdlog::info("Server: rejecting registration for reason {}", (int)joinResult);
 				SessionProtocol::SessionJoinReject reject;
@@ -158,6 +160,9 @@ int SessionServer::Step()
 				continue;
 			}
 
+			SessionProtocol::SessionCidMsg cidMsg;
+			cidMsg.cid = newCid;
+			Respond(conn, json(cidMsg));
 			_dataDirty = true;
 		}
 		else if (type == SessionProtocol::MT_PREBATTLE_SETCHARA) {
@@ -454,7 +459,14 @@ void SessionServer::SteamNetConnectionStatusChangedCallback(SteamNetConnectionSt
 	s_pCallbackInstance->OnSteamNetConnectionStatusChanged(pInfo);
 }
 
-SessionProtocol::JoinResult SessionServer::RegisterToWait(const HSteamNetConnection& conn, const uint16_t& port, const std::string& sidecarHash, const std::string& name, const SteamNetworkingIPAddr& peerAddr) {
+SessionProtocol::JoinResult SessionServer::RegisterToWait(
+	const HSteamNetConnection& conn,
+	const uint16_t& port,
+	const std::string& sidecarHash,
+	const std::string& name,
+	const SteamNetworkingIPAddr& peerAddr,
+	SessionProtocol::ConnectionID& newCid
+) {
 	if (sidecarHash != _sidecarHash) {
 		return SessionProtocol::JR_HASH_INVALID;
 	}
@@ -476,7 +488,8 @@ SessionProtocol::JoinResult SessionServer::RegisterToWait(const HSteamNetConnect
 	else {
 		peerAddr.ToString(peerAddrStr, SteamNetworkingIPAddr::k_cchMaxString, false);
 	}
-	SessionMember newMember{ {_identity + std::to_string(conn), name, peerAddrStr, port}, conn };
+	newCid = _identity + std::to_string(conn);
+	SessionMember newMember{ {newCid, name, peerAddrStr, port}, conn };
 	clients.push_back(std::move(newMember));
 	return SessionProtocol::JOIN_OK;
 }

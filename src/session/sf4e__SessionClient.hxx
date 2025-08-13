@@ -71,6 +71,7 @@ namespace sf4e {
 		uint16_t _ggpoPort;
 		SteamNetworkingIPAddr _serverAddr;
 		std::map<int, SessionProtocol::StateSnapshot> pendingRemoteSnapshots;
+		SessionProtocol::ConnectionID _cid;
 	private:
 
 		// Connection related data

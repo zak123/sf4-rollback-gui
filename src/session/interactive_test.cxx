@@ -170,6 +170,7 @@ struct AppInstance {
                 }
             }
 
+            Text("CID: %s", c._cid);
             Text("RNG seed: %d", c._matchData.rngSeed);
             Text("Stage ID: %d", c._matchData.stageID);
             for (int i = 0; i < 2; i++) {
@@ -178,10 +179,12 @@ struct AppInstance {
 
             for (int i = 0; i < 2 && i < c._lobbyData.members.size(); i++) {
                 const char* label = i == 0 ? "P1" : "P2";
+                const char* isMe = c._lobbyData.members[i].connId == c._cid ? " [Me] " : " ";
                 Text(
-                    "%s: %s (%s)",
+                    "%s: %s%s(%s)",
                     label,
                     c._lobbyData.members[i].name.c_str(),
+                    isMe,
                     c._matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
                 );
             }
@@ -189,7 +192,12 @@ struct AppInstance {
             Text("Queue:");
             if (c._lobbyData.members.size() > 2) {
                 for (int i = 2; i < c._lobbyData.members.size(); i++) {
-                    Text(c._lobbyData.members[i].name.c_str());
+                    const char* isMe = c._lobbyData.members[i].connId == c._cid ? " [Me] " : " ";
+                    Text(
+                        "%s%s",
+                        c._lobbyData.members[i].name.c_str(),
+                        isMe
+                    );
                 }
             }
             else {

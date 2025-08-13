@@ -161,7 +161,18 @@ int SessionClient::Step()
 			continue;
 		}
 
-		if (type == SessionProtocol::MT_SESSION_JOINREJ) {
+		if (type == SessionProtocol::MT_SESSION_CID) {
+			SessionProtocol::SessionCidMsg cidMsg;
+			try {
+				msg.get_to(cidMsg);
+			}
+			catch (json::exception e) {
+				spdlog::info("Client: couldn't deserialize CID?");
+				continue;
+			}
+			_cid = cidMsg.cid;
+		}
+		else if (type == SessionProtocol::MT_SESSION_JOINREJ) {
 			SessionProtocol::SessionJoinReject reject;
 			try {
 				msg.get_to(reject);

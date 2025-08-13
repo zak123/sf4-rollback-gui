@@ -14,21 +14,25 @@
 
 namespace sf4e {
 	namespace SessionProtocol {
-		typedef Dimps::Math::FixedPoint FixedPoint;
+		typedef Dimps::Math::FixedPoint FixedPoint; 
+
+
+		// Connection IDs are ephemeral and reusable- they can be used to
+		// distinguish clients from each other, but should not be used as
+		// any kind of stable identifier. Care should be taken that any
+		// references to connection IDs (including those inside client code)
+		// are released or deleted when the connection is terminated, to
+		// prevent referring to duplicate IDs.
+		typedef std::string ConnectionID;
 
 		enum MemberFlags {
 			MF_BATTLE_LOADED = 1,
 		};
 
 		struct MemberData {
-			// Connection IDs are ephemeral and reusable- they can be used to
-			// distinguish clients from each other, but should not be used as
-			// any kind of stable identifier. Care should be taken that any
-			// references to connection IDs (including those inside client code)
-			// are released or deleted when the connection is terminated, to
-			// prevent referring to duplicate IDs.
-			std::string connId;
+			ConnectionID connId;
 
+			// A user-provided display name.
 			std::string name;
 
 			// The IP the client has connected from. While not guaranteed to
@@ -58,6 +62,8 @@ namespace sf4e {
 		};
 
 		enum MessageType {
+			MT_SESSION_CID,
+
 			MT_SESSION_DATAUPDATE,
 			MT_SESSION_JOINREQ,
 			MT_SESSION_JOINREJ,
@@ -76,6 +82,7 @@ namespace sf4e {
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(MessageType, {
+			{MT_SESSION_CID, "cid"},
 			{MT_SESSION_DATAUPDATE, "data_update"},
 			{MT_SESSION_JOINREJ, "join_rej"},
 			{MT_SESSION_JOINREQ, "join_req"},
@@ -108,6 +115,11 @@ namespace sf4e {
 			{JR_NAME_TAKEN, "name_taken"},
 			{JR_HASH_INVALID, "hash_invalid"}
 		})
+
+		struct SessionCidMsg {
+			MessageType type = MT_SESSION_CID;
+			ConnectionID cid;
+		};
 
 		struct SessionDataUpdate {
 			MessageType type = MT_SESSION_DATAUPDATE;
@@ -197,6 +209,7 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, editionSelect, roundCount, roundTime, members);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed);
 
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionCidMsg, type, cid);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionDataUpdate, type, lobbyData, matchData);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinReject, type, result);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinRequest, type, sidecarHash, username, port);
