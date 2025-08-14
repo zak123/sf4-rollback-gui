@@ -1,3 +1,4 @@
+#include <string>
 #include <utility>
 #include <vector>
 #include <windows.h>
@@ -133,7 +134,44 @@ int SessionServer::Step()
 			continue;
 		}
 
-		if (type == SessionProtocol::MT_SESSION_JOINREQ) {
+		if (type == SessionProtocol::MT_FORWARD) {
+			SessionProtocol::ForwardMessage fwdMsg;
+			try {
+				msg.get_to(fwdMsg);
+			}
+			catch (json::exception e) {
+				spdlog::debug("Server: could not deserialize forwarding message");
+				continue;
+			}
+
+			// If this is a connection ID managed by this server, we can apply
+			// additional security- messages with this source address should
+			// only be coming from the connection that the address is assigned
+			// to.
+			if (fwdMsg.src.host == _identity) {
+				if (fwdMsg.src.user != std::to_string(conn)) {
+					spdlog::debug("Server: dropping fraudulent packet; {} masqueraded as {}", conn, fwdMsg.src.user);
+				}
+			}
+
+			if (fwdMsg.dest.host != _identity) {
+			   spdlog::info("Server: cannot forward to nonlocal identity {}@{}, clustering not yet implemented", fwdMsg.dest.user, fwdMsg.dest.host);
+			}
+
+			// Check that the destination is in fact the lobby
+			auto clientIter = clients.begin();
+			for (;clientIter != clients.end(); clientIter++) {
+				if (clientIter->data.connId == fwdMsg.dest) {
+					break;
+				}
+			}
+			if (clientIter != clients.end()) {
+				Respond(conn, msg);
+			} else {
+				spdlog::debug("Server: Could not forward to {}@{}: not in known lobby", fwdMsg.dest.user, fwdMsg.dest.host);
+			}
+		}
+		else if (type == SessionProtocol::MT_SESSION_JOINREQ) {
 			SessionProtocol::SessionJoinRequest request;
 			try {
 				msg.get_to(request);

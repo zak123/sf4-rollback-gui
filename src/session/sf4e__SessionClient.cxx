@@ -281,6 +281,9 @@ int SessionClient::Step()
 				pendingRemoteSnapshots.emplace(m.snapshot.frameIdx, m.snapshot);
 			}
 		}
+		else if (type == SessionProtocol::MT_FORWARD) {
+			spdlog::debug("Received forwarded message: {}", msg.dump());
+		}
 		else {
 			spdlog::warn("Client: got unrecognized message type: {}", (int)type);
 		}
@@ -477,6 +480,19 @@ EResult SessionClient::Battle_Loaded()
 	EResult result = Send(j, nullptr);
 	if (result != k_EResultOK) {
 		spdlog::warn("Client: could not set battle loaded! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Forward(const SessionProtocol::ConnectionID& dest, const json& fwd) {
+	SessionProtocol::ForwardMessage msg;
+	msg.dest = dest;
+	msg.src = _cid;
+	msg.msg = fwd;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not forward! Result: {}", (int)result);
 	}
 	return result;
 }

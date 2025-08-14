@@ -10,6 +10,7 @@
 #include <imgui_impl_win32.h>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/wincolor_sink.h>
 
 #include "sf4e__SessionClient.hxx"
 #include "sf4e__SessionServer.hxx"
@@ -71,6 +72,8 @@ struct AppInstance {
     PreBattleSetChara charaMsg;
     PreBattleSetEnv envMsg;
     PreBattleSetStage stageMsg;
+    int fwdDestIndex;
+    nlohmann::json fwdMsg;
     LobbyReportResults reportResultsReqBuf;
 
     AppInstance(
@@ -86,6 +89,7 @@ struct AppInstance {
             name
         ),
         menuCharaID(0),
+        fwdDestIndex(0),
         running(true)
     {
         envMsg.rngSeed = 0;
@@ -100,6 +104,7 @@ struct AppInstance {
         charaMsg.chara.handicap = 0;
         charaMsg.chara.unc_edition = 0;
         reportResultsReqBuf.loserSide = 0;
+        fwdMsg = "hi";
     }
 
     void Update() {
@@ -141,6 +146,19 @@ struct AppInstance {
 
         if (Button("Send results")) {
             c.Lobby_ReportResults(reportResultsReqBuf.loserSide);
+        }
+    }
+
+    void DrawForwardingForm() {
+        Text("Forwarding");
+        if (c._lobbyData.members.size() > 0) {
+            ImGui::InputInt("Forward destination", &fwdDestIndex);
+            if (fwdDestIndex < 0 || fwdDestIndex >= c._lobbyData.members.size()) {
+                fwdDestIndex = 0;
+            }
+            if (Button("Forward message")) {
+                this->c.Forward(c._lobbyData.members.at(fwdDestIndex).connId, fwdMsg);
+            }
         }
     }
 
@@ -209,6 +227,8 @@ struct AppInstance {
             DrawBattleLoadedForm();
             Separator();
             DrawResultsForm();
+            Separator();
+            DrawForwardingForm();
             Separator();
             if (Button("Disconnect")) {
                 c.Disconnect();
@@ -353,6 +373,15 @@ int DrawAppInstanceWindow(int idx, AppInstance& app) {
 // Main code
 int main(int, char**)
 {
+    std::vector<spdlog::sink_ptr> sinks;
+    sinks.push_back(std::shared_ptr<spdlog::sinks::wincolor_stdout_sink_mt>(
+        new spdlog::sinks::wincolor_stdout_sink_mt()
+    ));
+    std::shared_ptr<spdlog::logger> logger(new spdlog::logger("interactive-test", sinks.begin(), sinks.end()));
+    spdlog::set_default_logger(logger);
+    spdlog::set_level(spdlog::level::debug);
+    spdlog::info("Welcome to interactive-test");
+
     SteamDatagramErrMsg errMsg;
     if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
         spdlog::error("GameNetworkingSockets_Init failed.  {}", errMsg);

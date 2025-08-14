@@ -63,6 +63,8 @@ namespace sf4e {
 
 		EResult Battle_Loaded();
 
+		EResult Forward(const SessionProtocol::ConnectionID& dest, const nlohmann::json& msg);
+
 		// Public for testing
 		EResult Send(nlohmann::json& msg, int64_t* outMessageNum);
 		

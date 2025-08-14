@@ -85,6 +85,8 @@ namespace sf4e {
 			MT_BATTLE_LOADED,
 			MT_BATTLE_SYNCED,
 			MT_BATTLE_SNAPSHOT,
+
+			MT_FORWARD,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(MessageType, {
@@ -104,6 +106,8 @@ namespace sf4e {
 			{MT_BATTLE_LOADED, "battle_loaded"},
 			{MT_BATTLE_SYNCED, "battle_synced"},
 			{MT_BATTLE_SNAPSHOT, "battle_snapshot"},
+
+			{MT_FORWARD, "forward"},
 		})
 
 		enum JoinResult {
@@ -211,6 +215,13 @@ namespace sf4e {
 			StateSnapshot snapshot;
 		};
 
+		struct ForwardMessage {
+			MessageType type = MT_FORWARD;
+			ConnectionID src;
+			ConnectionID dest;
+			nlohmann::json msg;
+		};
+
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ConnectionID, host, user);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MemberData, connId, name, ip, port);
@@ -229,6 +240,7 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PreBattleSetChara, type, chara);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PreBattleSetEnv, type, rngSeed);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PreBattleSetStage, type, stageID);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ForwardMessage, type, src, dest, msg);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(StateSnapshot::CharaStateSnapshot, status, rootPos, side, vit, vitmax, revenge, revengemax, recoverable, recoverablemax, super, supermax, sctimeamt, sctimemax, uctime, uctimemax, damage, combodamage);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(StateSnapshot, frameIdx, chara);
