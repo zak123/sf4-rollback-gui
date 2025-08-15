@@ -3,6 +3,10 @@
 
 namespace sf4e {
 	namespace SessionProtocol {
+		bool ConnectionID::operator==(const ConnectionID& rhs) {
+			return this->host == rhs.host && this->user == rhs.user;
+		}
+
 		MatchData::MatchData()
 		{
 			Clear();

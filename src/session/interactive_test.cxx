@@ -170,7 +170,7 @@ struct AppInstance {
                 }
             }
 
-            Text("CID: %s", c._cid);
+            Text("CID: %s@%s", c._cid.user.c_str(), c._cid.host.c_str());
             Text("RNG seed: %d", c._matchData.rngSeed);
             Text("Stage ID: %d", c._matchData.stageID);
             for (int i = 0; i < 2; i++) {
@@ -267,11 +267,12 @@ void DrawServerSessionInfo(const std::vector<SessionServer::SessionMember>& clie
     for (int i = 0; i < 2 && i < clients.size(); i++) {
         const char* label = i == 0 ? "P1" : "P2";
         Text(
-            "%s: %s (%s) [%s] %llx",
+            "%s: %s (%s) [%s@%s] %llx",
             label,
             clients[i].data.name.c_str(),
             matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting",
-            clients[i].data.connId.c_str(),
+            clients[i].data.connId.user.c_str(),
+            clients[i].data.connId.host.c_str(),
             clients[i].data.flags
         );
     }
@@ -280,9 +281,10 @@ void DrawServerSessionInfo(const std::vector<SessionServer::SessionMember>& clie
     if (clients.size() > 2) {
         for (int i = 2; i < clients.size(); i++) {
             Text(
-                "%s [%s]",
+                "%s [%s@%s]",
                 clients[i].data.name.c_str(),
-                clients[i].data.connId.c_str()
+                clients[i].data.connId.user.c_str(),
+                clients[i].data.connId.host.c_str()
             );
         }
     }
@@ -356,7 +358,7 @@ int main(int, char**)
         spdlog::error("GameNetworkingSockets_Init failed.  {}", errMsg);
     }
     sf4e::SessionProtocol::FixedPoint stubRoundTime = { 0, 99 };
-    g_server.reset(new SessionServer(std::string("localhost/"), std::string("123"), false, 3, stubRoundTime));
+    g_server.reset(new SessionServer(std::string("localhost"), std::string("123"), false, 3, stubRoundTime));
 
     ImGui_ImplWin32_EnableDpiAwareness();
     WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"sf4e session interactive tests", nullptr };

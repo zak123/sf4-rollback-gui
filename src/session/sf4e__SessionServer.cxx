@@ -488,7 +488,8 @@ SessionProtocol::JoinResult SessionServer::RegisterToWait(
 	else {
 		peerAddr.ToString(peerAddrStr, SteamNetworkingIPAddr::k_cchMaxString, false);
 	}
-	newCid = _identity + std::to_string(conn);
+	newCid.host = _identity;
+	newCid.user = std::to_string(conn);
 	SessionMember newMember{ {newCid, name, peerAddrStr, port}, conn };
 	clients.push_back(std::move(newMember));
 	return SessionProtocol::JOIN_OK;

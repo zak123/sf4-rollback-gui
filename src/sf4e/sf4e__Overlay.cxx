@@ -933,7 +933,7 @@ void DrawNetworkHostPanel(uint8_t deviceIdx, uint8_t deviceType) {
 	if (Button("Start hosting")) {
 		char hostAddr[64];
 		snprintf(hostAddr, 64, "127.0.0.1:%d", hostPort);
-		fUserApp::StartServer(hostPort, std::string("localhost/"), sf4e::sidecarHash, bEditionSelect, roundCountList[roundCountIdx].first, roundTimeList[roundTimeIdx].first);
+		fUserApp::StartServer(hostPort, std::string("localhost"), sf4e::sidecarHash, bEditionSelect, roundCountList[roundCountIdx].first, roundTimeList[roundTimeIdx].first);
 		fUserApp::StartSession(hostAddr, ggpoPort, sf4e::sidecarHash, std::string(name), deviceType, deviceIdx, delay);
 	}
 	ImGui::EndDisabled();
@@ -949,13 +949,13 @@ void DrawNetworkLobbyPanel() {
 	}
 
 	int isSelfActiveSide = -1;
+	sf4e::SessionClient& client = fUserApp::session->client;
 	ImGui::Checkbox("Verbose logging?", &sf4e::SessionClient::bVerboseLogging);
 	Separator();
 
-	Text("CID: %d", fUserApp::session->client._cid);
+	Text("CID: %s@%s", client._cid.user.c_str(), client._cid.host.c_str());
 
 	// List the members
-	sf4e::SessionClient& client = fUserApp::session->client;
 	Text("Round count: %d", client._lobbyData.roundCount);
 	Text("Round time: %d", client._lobbyData.roundTime.integral);
 	Text("Edition select: %d", client._lobbyData.editionSelect);
@@ -1111,7 +1111,13 @@ void DrawNetworkWindow(bool* pOpen) {
 				if (bDebug) {
 					Text("Server initialized, client map:");
 					for (auto iter = fUserApp::server->clients.begin(); iter != fUserApp::server->clients.end(); iter++) {
-						Text("%x %s %s", iter->conn, iter->data.connId.c_str(), iter->data.name.c_str());
+						Text(
+							"%x %s@%s %s",
+							iter->conn,
+							iter->data.connId.user.c_str(),
+							iter->data.connId.host.c_str(),
+							iter->data.name.c_str()
+						);
 					}
 				}
 				if (fUserApp::session) {

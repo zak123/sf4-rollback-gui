@@ -16,14 +16,20 @@ namespace sf4e {
 	namespace SessionProtocol {
 		typedef Dimps::Math::FixedPoint FixedPoint; 
 
-
 		// Connection IDs are ephemeral and reusable- they can be used to
 		// distinguish clients from each other, but should not be used as
-		// any kind of stable identifier. Care should be taken that any
-		// references to connection IDs (including those inside client code)
-		// are released or deleted when the connection is terminated, to
-		// prevent referring to duplicate IDs.
-		typedef std::string ConnectionID;
+		// any kind of stable identifier. "user" in this context is _not_
+		// a typical user account- it only correspond to the `username`
+		// portion of a URL. Care should be taken that any references to
+		// connection IDs (including those inside client code) are released
+		// or deleted when the connection is terminated, to prevent
+		// referring to duplicate IDs.
+		struct ConnectionID {
+			std::string host;
+			std::string user;
+
+			bool operator==(const ConnectionID&);
+		};
 
 		enum MemberFlags {
 			MF_BATTLE_LOADED = 1,
@@ -204,6 +210,8 @@ namespace sf4e {
 			MessageType type = MT_BATTLE_SNAPSHOT;
 			StateSnapshot snapshot;
 		};
+
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ConnectionID, host, user);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MemberData, connId, name, ip, port);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, editionSelect, roundCount, roundTime, members);
