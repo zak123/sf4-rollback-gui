@@ -222,10 +222,10 @@ int fVsBattle::HasInitialized() {
 	if (bBlockInitialization) {
 		return 0;
 	}
-	if (fUserApp::session) {
+	if (fUserApp::netplay) {
 		if (!bSessionSentLoaded) {
 			bSessionSentLoaded = true;
-			fUserApp::session->client.Battle_Loaded();
+			fUserApp::netplay->client.Battle_Loaded();
 		}
 		if (!bSessionSynced) {
 			return 0;

@@ -45,10 +45,10 @@ using sf4e::Game::Battle::Sound::SoundPlayerManager;
 using sf4e::SessionClient;
 using sf4e::SessionServer;
 
-std::unique_ptr<fUserApp::Session> fUserApp::session;
+std::unique_ptr<fUserApp::Netplay> fUserApp::netplay;
 std::unique_ptr<SessionServer> fUserApp::server;
 
-sf4e::UserApp::Session::Session(
+sf4e::UserApp::Netplay::Netplay(
     const SessionClient::Callbacks& callbacks,
     std::string sidecarHash,
     uint16_t ggpoPort,
@@ -68,35 +68,35 @@ void fUserApp::_OnVsBattleTasksRegistered()
     // Start the GGPO connection
     bool isPlayer = false;
     for (int i = 0; i < 2; i++) {
-        if (session->client._lobbyData.members[i].name == session->client._name) {
+        if (netplay->client._lobbyData.members[i].name == netplay->client._name) {
             isPlayer = true;
             break;
         }
     }
     if (isPlayer) {
         GGPOPlayer players[MAX_SF4E_PROTOCOL_USERS];
-        for (int i = 0; i < 2 && i < session->client._lobbyData.members.size(); i++) {
-            SessionProtocol::MemberData& memberData = session->client._lobbyData.members[i];
+        for (int i = 0; i < 2 && i < netplay->client._lobbyData.members.size(); i++) {
+            SessionProtocol::MemberData& memberData = netplay->client._lobbyData.members[i];
             GGPOPlayer& player = players[i];
             player.size = sizeof(GGPOPlayer);
             player.player_num = i + 1;
-            if (session->client._lobbyData.members[i].name == session->client._name) {
+            if (netplay->client._lobbyData.members[i].name == netplay->client._name) {
                 player.type = GGPO_PLAYERTYPE_LOCAL;
 
                 // Inject the chosen device into this player's side
                 Dimps::Pad::System* padSys = Dimps::Pad::System::staticMethods.GetSingleton();
                 Dimps::Pad::System::__publicMethods& padSysMethods = Dimps::Pad::System::publicMethods;
-                (padSys->*padSysMethods.AssociatePlayerAndGamepad)(i, session->deviceIdx);
-                (padSys->*padSysMethods.SetDeviceTypeForPlayer)(i, session->deviceType);
+                (padSys->*padSysMethods.AssociatePlayerAndGamepad)(i, netplay->deviceIdx);
+                (padSys->*padSysMethods.SetDeviceTypeForPlayer)(i, netplay->deviceType);
                 (padSys->*padSysMethods.SetSideHasAssignedController)(i, 1);
                 (padSys->*padSysMethods.SetActiveButtonMapping)(Dimps::Pad::System::BUTTON_MAPPING_FIGHT);
             }
             else {
-                SessionProtocol::MemberData& memberData = session->client._lobbyData.members[i];
+                SessionProtocol::MemberData& memberData = netplay->client._lobbyData.members[i];
                 player.type = GGPO_PLAYERTYPE_REMOTE;
                 if (memberData.ip.empty()) {
                     char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
-                    session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
+                    netplay->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
                     strcpy_s(player.u.remote.ip_address, 32, szAddr);
                 }
                 else {
@@ -106,15 +106,15 @@ void fUserApp::_OnVsBattleTasksRegistered()
                 player.u.remote.port = memberData.port;
             }
         }
-        for (int i = 2; i < session->client._lobbyData.members.size(); i++) {
-            SessionProtocol::MemberData& memberData = session->client._lobbyData.members[i];
+        for (int i = 2; i < netplay->client._lobbyData.members.size(); i++) {
+            SessionProtocol::MemberData& memberData = netplay->client._lobbyData.members[i];
             GGPOPlayer& player = players[i];
             player.type = GGPO_PLAYERTYPE_SPECTATOR;
             player.u.remote.port = memberData.port;
 
             if (memberData.ip.empty()) {
                 char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
-                session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
+                netplay->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
                 strcpy_s(player.u.remote.ip_address, 32, szAddr);
             }
             else {
@@ -123,10 +123,10 @@ void fUserApp::_OnVsBattleTasksRegistered()
         }
         fSystem::StartGGPO(
             players,
-            session->client._lobbyData.members.size(),
-            session->client._ggpoPort,
-            session->delay,
-            session->client._matchData.rngSeed
+            netplay->client._lobbyData.members.size(),
+            netplay->client._ggpoPort,
+            netplay->delay,
+            netplay->client._matchData.rngSeed
         );
     }
     else {
@@ -136,22 +136,22 @@ void fUserApp::_OnVsBattleTasksRegistered()
         // 
         char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
         char* hostIP;
-        if (session->client._lobbyData.members[0].ip.empty()) {
-            session->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
+        if (netplay->client._lobbyData.members[0].ip.empty()) {
+            netplay->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
             hostIP = szAddr;
         }
         else {
             // Safe-_ish_ removal of const. This gets passed through
             // to an inet_pton() call and never modified.
-            hostIP = (char*)session->client._lobbyData.members[0].ip.c_str();
+            hostIP = (char*)netplay->client._lobbyData.members[0].ip.c_str();
         }
 
         fSystem::StartSpectating(
-            session->client._ggpoPort,
+            netplay->client._ggpoPort,
             2,
             hostIP,
-            session->client._lobbyData.members[0].port,
-            session->client._matchData.rngSeed
+            netplay->client._lobbyData.members[0].port,
+            netplay->client._matchData.rngSeed
         );
     }
 }
@@ -174,14 +174,14 @@ void fUserApp::_OnVsPreBattleTasksRegistered()
     Dimps::Platform::dString* stageName = rVsMode::GetStageName(mode);
     rVsMode::ConfirmedPlayerConditions* conditions = rVsMode::GetConfirmedPlayerConditions(mode);
     for (int i = 0; i < 2; i++) {
-        *(rVsMode::ConfirmedPlayerConditions::GetCharaID(&conditions[i])) = session->client._matchData.chara[i].charaID;
+        *(rVsMode::ConfirmedPlayerConditions::GetCharaID(&conditions[i])) = netplay->client._matchData.chara[i].charaID;
         *(rVsMode::ConfirmedPlayerConditions::GetSideActive(&conditions[i])) = 1;
         rVsMode::ConfirmedCharaConditions* charaConditions = rVsMode::ConfirmedPlayerConditions::GetCharaConditions(&conditions[i]);
-        memcpy_s(charaConditions, charaConditionSize, &session->client._matchData.chara[i], charaConditionSize);
+        memcpy_s(charaConditions, charaConditionSize, &netplay->client._matchData.chara[i], charaConditionSize);
     }
 
-    (stageName->*Dimps::Platform::dString::publicMethods.assign)(Dimps::stageCodes[session->client._matchData.stageID], 4);
-    *(rVsMode::GetStageCode(mode)) = session->client._matchData.stageID;
+    (stageName->*Dimps::Platform::dString::publicMethods.assign)(Dimps::stageCodes[netplay->client._matchData.stageID], 4);
+    *(rVsMode::GetStageCode(mode)) = netplay->client._matchData.stageID;
 }
 
 void OnReady(sf4e::SessionClient* const client, const sf4e::SessionClient::Callbacks& c) {
@@ -231,7 +231,7 @@ void fUserApp::StartSession(char* joinAddr, uint16_t port, std::string& sidecarH
     SteamNetworkingIPAddr addr;
     addr.Clear();
     addr.ParseString(joinAddr);
-    session.reset(new Session(
+    netplay.reset(new Netplay(
         clientCallbacks,
         sidecarHash,
         port,
@@ -240,7 +240,7 @@ void fUserApp::StartSession(char* joinAddr, uint16_t port, std::string& sidecarH
         deviceIdx,
         delay
     ));
-    session->client.Connect(addr);
+    netplay->client.Connect(addr);
 }
 
 void fUserApp::StartServer(uint16 hostPort, std::string& identity, std::string& sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) {
@@ -249,17 +249,17 @@ void fUserApp::StartServer(uint16 hostPort, std::string& identity, std::string& 
 }
 
 void fUserApp::Steam_PostUpdate() {
-    if (session) {
-        session->client.PrepareForCallbacks();
+    if (netplay) {
+        netplay->client.PrepareForCallbacks();
     }
     if (server) {
         server->PrepareForCallbacks();
     }
     SteamNetworkingSockets()->RunCallbacks();
 
-    if (session) {
-        if (session->client.Step()) {
-            delete session.release();
+    if (netplay) {
+        if (netplay->client.Step()) {
+            delete netplay.release();
         }
     }
 

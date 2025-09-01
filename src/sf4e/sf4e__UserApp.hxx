@@ -13,8 +13,8 @@
 namespace sf4e {
     struct UserApp : Dimps::UserApp
     {
-        struct Session {
-            Session(
+        struct Netplay {
+            Netplay(
                 const SessionClient::Callbacks& callbacks,
                 std::string sidecarHash,
                 uint16_t ggpoPort,
@@ -30,7 +30,7 @@ namespace sf4e {
             uint8_t delay;
         };
 
-        static std::unique_ptr<Session> session;
+        static std::unique_ptr<Netplay> netplay;
         static std::unique_ptr<SessionServer> server;
 
         static void Install();

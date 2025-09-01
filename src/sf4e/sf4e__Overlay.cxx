@@ -668,9 +668,9 @@ void DrawGGPOStatsOverlay(GGPOSession* ggpo, fSystem::PlayerConnectionInfo* play
 		Columns(2);
 		Text("len(PndSnaps)"); NextColumn();
 		Text("len(snapMap)"); NextColumn();
-		if (fUserApp::session) {
+		if (fUserApp::netplay) {
 
-			Text("%d", fUserApp::session->client.pendingRemoteSnapshots.size()); NextColumn();
+			Text("%d", fUserApp::netplay->client.pendingRemoteSnapshots.size()); NextColumn();
 		}
 		else {
 			Text("N/A"); NextColumn();
@@ -702,9 +702,9 @@ void DrawGGPOStatsOverlay(GGPOSession* ggpo, fSystem::PlayerConnectionInfo* play
 		Text("%d", stats.network.send_queue_len);  NextColumn();
 		Text("%d", stats.timesync.local_frames_behind);  NextColumn();
 		Text("%d", stats.timesync.remote_frames_behind);  NextColumn();
-		if (fUserApp::session) {
+		if (fUserApp::netplay) {
 
-			Text("%d", fUserApp::session->client.pendingRemoteSnapshots.size()); NextColumn();
+			Text("%d", fUserApp::netplay->client.pendingRemoteSnapshots.size()); NextColumn();
 		}
 		else {
 			Text("N/A"); NextColumn();
@@ -943,13 +943,13 @@ void DrawNetworkLobbyPanel() {
 	static int stageID = 0;
 	static rVsMode::ConfirmedCharaConditions myConditions = { 0, 0, 0, 0, 0, 0, 0, 0, rBattle::ED_USF4};
 
-	if (!fUserApp::session) {
-		Text("No session");
+	if (!fUserApp::netplay) {
+		Text("Netplay not active");
 		return;
 	}
 
 	int isSelfActiveSide = -1;
-	sf4e::SessionClient& client = fUserApp::session->client;
+	sf4e::SessionClient& client = fUserApp::netplay->client;
 	ImGui::Checkbox("Verbose logging?", &sf4e::SessionClient::bVerboseLogging);
 	Separator();
 
@@ -970,7 +970,7 @@ void DrawNetworkLobbyPanel() {
 			isMe,
 			client._matchData.readyMessageNum[i] > -1 ? "Ready!" : "Waiting"
 		);
-		if (members[i].name == fUserApp::session->client._name) {
+		if (members[i].name == fUserApp::netplay->client._name) {
 			isSelfActiveSide = i;
 		}
 	}
@@ -993,10 +993,10 @@ void DrawNetworkLobbyPanel() {
 	Separator();
 	// Draw the config if the player's active
 	if (isSelfActiveSide > -1) {
-		if (fUserApp::session->client._outstandingReadyRequestNumber > -1) {
+		if (fUserApp::netplay->client._outstandingReadyRequestNumber > -1) {
 			Text("Waiting for response...");
 		}
-		else if (fUserApp::session->client._matchData.readyMessageNum[isSelfActiveSide] > -1) {
+		else if (fUserApp::netplay->client._matchData.readyMessageNum[isSelfActiveSide] > -1) {
 			Text("Ready!");
 		}
 		else {
@@ -1005,26 +1005,26 @@ void DrawNetworkLobbyPanel() {
 				ImGui::Combo("Stage", &stageID, Dimps::stageNames, 30);
 			}
 			if (Button("Send chara")) {
-				if (fUserApp::session->client.PreBattle_SetChara(myConditions) != k_EResultOK) {
+				if (fUserApp::netplay->client.PreBattle_SetChara(myConditions) != k_EResultOK) {
 					MessageBoxA(NULL, "Could not send chara conditions!", NULL, MB_OK);
 				}
 
 				if (isSelfActiveSide == 0) {
-					if (fUserApp::session->client.PreBattle_SetEnv(sf4e::localRand()) != k_EResultOK) {
+					if (fUserApp::netplay->client.PreBattle_SetEnv(sf4e::localRand()) != k_EResultOK) {
 						MessageBoxA(NULL, "Could not send environment!", NULL, MB_OK);
 					}
-					if (fUserApp::session->client.PreBattle_SetStage(stageID) != k_EResultOK) {
+					if (fUserApp::netplay->client.PreBattle_SetStage(stageID) != k_EResultOK) {
 						MessageBoxA(NULL, "Could not send stage!", NULL, MB_OK);
 					}
 				}
 
-				fUserApp::session->client.Lobby_Ready();
+				fUserApp::netplay->client.Lobby_Ready();
 			}
 		}
 
 		if (Button("Report win")) {
 			int loser = (isSelfActiveSide == 0) ? 1 : 0;
-			if (fUserApp::session->client.Lobby_ReportResults(loser) != k_EResultOK) {
+			if (fUserApp::netplay->client.Lobby_ReportResults(loser) != k_EResultOK) {
 				MessageBoxA(NULL, "Could not report results!", NULL, MB_OK);
 			}
 		}
@@ -1120,7 +1120,7 @@ void DrawNetworkWindow(bool* pOpen) {
 						);
 					}
 				}
-				if (fUserApp::session) {
+				if (fUserApp::netplay) {
 					Separator();
 					Text("Client");
 					DrawNetworkLobbyPanel();
@@ -1128,7 +1128,7 @@ void DrawNetworkWindow(bool* pOpen) {
 			}
 			break;
 		case NWS_JOIN:
-			if (!fUserApp::session) {
+			if (!fUserApp::netplay) {
 				DrawNetworkJoinPanel(deviceIdx, deviceType);
 				if (Button("Go back")) {
 					netState = NWS_DECIDE;
