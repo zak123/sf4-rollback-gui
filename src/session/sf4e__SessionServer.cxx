@@ -35,9 +35,10 @@ SessionServer::SessionServer(std::string identity, std::string sidecarHash, bool
 	_sidecarHash(sidecarHash),
 	_interface(SteamNetworkingSockets()),
 	_dataDirty(false),
-	_lobbyData(),
+	_lobbyData(SessionProtocol::LobbyData::NULL_LOBBY),
 	_listenSock(k_HSteamListenSocket_Invalid)
 {
+	_lobbyData.id = { _identity, "1" };
 	_lobbyData.editionSelect = editionSelect;
 	_lobbyData.roundCount = roundCount;
 	_lobbyData.roundTime = roundTime;

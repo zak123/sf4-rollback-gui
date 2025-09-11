@@ -953,6 +953,7 @@ void DrawNetworkLobbyPanel() {
 	ImGui::Checkbox("Verbose logging?", &sf4e::SessionClient::bVerboseLogging);
 	Separator();
 
+	Text("LID: %s@%s", client._lobbyData.id.host.c_str(), client._lobbyData.id.key.c_str());
 	Text("CID: %s@%s", client._cid.user.c_str(), client._cid.host.c_str());
 
 	// List the members

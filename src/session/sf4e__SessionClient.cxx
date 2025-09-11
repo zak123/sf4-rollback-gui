@@ -41,7 +41,8 @@ SessionClient::SessionClient(
 	_ggpoPort(ggpoPort),
 	_interface(SteamNetworkingSockets()),
 	_conn(k_HSteamNetConnection_Invalid),
-	_connected(false)
+	_connected(false),
+	_lobbyData(SessionProtocol::LobbyData::NULL_LOBBY)
 {
 	_serverAddr.Clear();
 }
@@ -107,6 +108,7 @@ void SessionClient::Disconnect() {
 		_interface->CloseConnection(_conn, k_ESteamNetConnectionEnd_App_Generic, nullptr, true);
 		_conn = k_HSteamNetConnection_Invalid;
 		_connected = false;
+		_lobbyData = SessionProtocol::LobbyData::NULL_LOBBY;
 	}
 }
 

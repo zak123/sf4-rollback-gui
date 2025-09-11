@@ -7,6 +7,23 @@ namespace sf4e {
 			return this->host == rhs.host && this->user == rhs.user;
 		}
 
+		bool LobbyID::operator==(const LobbyID& rhs) {
+			if (this->host == "" || this->key == "") {
+				return rhs.host == "" || rhs.key == "";
+			}
+
+			return this->host == rhs.host && this->key == rhs.key;
+		}
+
+		const LobbyID LobbyID::NULL_LOBBY_ID = { "", "" };
+		const LobbyData LobbyData::NULL_LOBBY = {
+			LobbyID::NULL_LOBBY_ID,
+			false,
+			0,
+			{0, 0},
+			{}
+		};
+
 		MatchData::MatchData()
 		{
 			Clear();

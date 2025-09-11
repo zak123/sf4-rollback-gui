@@ -188,6 +188,7 @@ struct AppInstance {
                 }
             }
 
+            Text("LID: %s@%s", c._lobbyData.id.host.c_str(), c._lobbyData.id.key.c_str());
             Text("CID: %s@%s", c._cid.user.c_str(), c._cid.host.c_str());
             Text("RNG seed: %d", c._matchData.rngSeed);
             Text("Stage ID: %d", c._matchData.stageID);

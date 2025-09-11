@@ -31,6 +31,18 @@ namespace sf4e {
 			bool operator==(const ConnectionID&);
 		};
 
+		// Similar to connection IDs, lobby IDs are ephemeral and reusable.
+		// All lobby IDs containing an empty string as the host or key are
+		// equivalent and unreachable, and the canonical null lobby, which
+		// contains no members, is represented as {"", ""}.
+		struct LobbyID {
+			std::string host;
+			std::string key;
+
+			bool operator==(const LobbyID& rhs);
+			static const LobbyID NULL_LOBBY_ID;
+		};
+
 		enum MemberFlags {
 			MF_BATTLE_LOADED = 1,
 		};
@@ -50,10 +62,13 @@ namespace sf4e {
 		};
 
 		struct LobbyData {
+			LobbyID id;
 			bool editionSelect;
 			int roundCount;
 			FixedPoint roundTime;
 			std::vector<MemberData> members;
+
+			static const LobbyData NULL_LOBBY;
 		};
 
 		struct MatchData {
@@ -223,9 +238,10 @@ namespace sf4e {
 		};
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ConnectionID, host, user);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyID, host, key);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MemberData, connId, name, ip, port);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, editionSelect, roundCount, roundTime, members);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, id, editionSelect, roundCount, roundTime, members);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionCidMsg, type, cid);
