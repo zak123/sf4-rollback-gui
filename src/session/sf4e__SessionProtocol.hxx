@@ -83,7 +83,8 @@ namespace sf4e {
 		};
 
 		enum MessageType {
-			MT_SESSION_CID,
+			MT_SESSION_HELLO,
+			MT_SESSION_HELLO_RESP,
 
 			MT_SESSION_DATAUPDATE,
 			MT_SESSION_JOINREQ,
@@ -105,7 +106,8 @@ namespace sf4e {
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(MessageType, {
-			{MT_SESSION_CID, "cid"},
+			{MT_SESSION_HELLO, "hello"},
+			{MT_SESSION_HELLO_RESP, "hello_resp"},
 			{MT_SESSION_DATAUPDATE, "data_update"},
 			{MT_SESSION_JOINREJ, "join_rej"},
 			{MT_SESSION_JOINREQ, "join_req"},
@@ -141,8 +143,13 @@ namespace sf4e {
 			{JR_HASH_INVALID, "hash_invalid"}
 		})
 
-		struct SessionCidMsg {
-			MessageType type = MT_SESSION_CID;
+		struct SessionHelloMsg {
+			MessageType type = MT_SESSION_HELLO;
+			ConnectionID cid;
+		};
+
+		struct SessionHelloResp {
+			MessageType type = MT_SESSION_HELLO_RESP;
 			ConnectionID cid;
 		};
 
@@ -244,7 +251,8 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, id, editionSelect, roundCount, roundTime, members);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed);
 
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionCidMsg, type, cid);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionHelloMsg, type);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionHelloResp, type, cid);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionDataUpdate, type, lobbyData, matchData);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinReject, type, result);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinRequest, type, sidecarHash, username, port);

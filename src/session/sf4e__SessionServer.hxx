@@ -48,7 +48,7 @@ namespace sf4e {
 			const std::string& sidecarHash,
 			const std::string& name,
 			const SteamNetworkingIPAddr& peerAddr,
-			SessionProtocol::ConnectionID& newCid
+			SessionProtocol::ConnectionID& cid
 		);
 		void HandleResults(int loserSide);
 
@@ -74,8 +74,8 @@ namespace sf4e {
 			HSteamNetConnection conn;
 		} SessionMember;
 
+		std::map<HSteamNetConnection, SessionProtocol::ConnectionID> cidMap;
 		std::vector<SessionMember> clients;
-
 
 		// Lobby data: Public for visibility into tests only.
 		bool _dataDirty;

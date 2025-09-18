@@ -23,6 +23,7 @@ using ImGui::Separator;
 using ImGui::Text;
 
 using sf4e::SessionClient;
+using sf4e::SessionProtocol::SessionHelloMsg;
 using sf4e::SessionProtocol::SessionJoinRequest;
 using sf4e::SessionProtocol::PreBattleSetChara;
 using sf4e::SessionProtocol::PreBattleSetEnv;
@@ -177,14 +178,11 @@ struct AppInstance {
             ImGui::PopStyleColor(4);
         }
         else {
-            if (Button("Send join")) {
-                SessionJoinRequest request;
-                request.sidecarHash = c._sidecarHash;
-                request.username = c._name;
-                request.port = c._ggpoPort;
-                nlohmann::json msg = request;
+            if (Button("Send hello")) {
+                SessionHelloMsg hello;
+                nlohmann::json msg = hello;
                 if (this->c.Send(msg, nullptr) != k_EResultOK) {
-                    spdlog::warn("Client could send initial join request");
+                    spdlog::warn("Client could not send hello");
                 }
             }
 

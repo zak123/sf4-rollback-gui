@@ -163,8 +163,8 @@ int SessionClient::Step()
 			continue;
 		}
 
-		if (type == SessionProtocol::MT_SESSION_CID) {
-			SessionProtocol::SessionCidMsg cidMsg;
+		if (type == SessionProtocol::MT_SESSION_HELLO_RESP) {
+			SessionProtocol::SessionHelloResp cidMsg;
 			try {
 				msg.get_to(cidMsg);
 			}
@@ -172,7 +172,17 @@ int SessionClient::Step()
 				spdlog::info("Client: couldn't deserialize CID?");
 				continue;
 			}
+			
 			_cid = cidMsg.cid;
+
+			SessionProtocol::SessionJoinRequest request;
+			request.sidecarHash = _sidecarHash;
+			request.username = _name;
+			request.port = _ggpoPort;
+			json msg = request;
+			if (Send(msg, nullptr) != k_EResultOK) {
+				spdlog::warn("Client could send initial join request");
+			}
 		}
 		else if (type == SessionProtocol::MT_SESSION_JOINREJ) {
 			SessionProtocol::SessionJoinReject reject;
@@ -393,13 +403,10 @@ void SessionClient::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusCh
 	{
 		spdlog::info("Client connected to server OK, attempting to join...");
 		_connected = true;
-		SessionProtocol::SessionJoinRequest request;
-		request.sidecarHash = _sidecarHash;
-		request.username = _name;
-		request.port = _ggpoPort;
-		json msg = request;
+		SessionProtocol::SessionHelloMsg hello;
+		json msg = hello;
 		if (Send(msg, nullptr) != k_EResultOK) {
-			spdlog::warn("Client could send initial join request");
+			spdlog::warn("Client could not send hello");
 		}
 		break;
 	}
