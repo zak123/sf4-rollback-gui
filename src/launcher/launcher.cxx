@@ -249,6 +249,53 @@ void CreateSF4Process(
 	}
 }
 
+int UpdatePath(const wchar_t* const szLauncherDirW, wchar_t* const szErrorStringW, const int nErrorStringLen) {
+	// Modify PATH to contain the launcher's directory. While this isn't that
+	// useful for the launcher itself, child processes inherit the parent's
+	// environment by default, so the child SF4 process will search in the
+	// launcher directory for DLLs.
+	const int nPathBufSize = 2048;
+	wchar_t szPathW[nPathBufSize] = { 0 };
+	wchar_t szNewPathW[nPathBufSize] = { 0 };
+
+	DWORD nPathSize = GetEnvironmentVariableW(L"PATH", szPathW, 2048);
+	DWORD res;
+
+	if (nPathSize == 0) {
+		DWORD err = GetLastError();
+		if (err != ERROR_ENVVAR_NOT_FOUND) {
+			spdlog::warn(L"UpdatePath: GetEnvironmentVariable(\"PATH\", ...) failed: {}", err);
+		}
+		return 0;
+	}
+
+	if (nPathSize >= nPathBufSize) {
+		spdlog::warn(L"UpdatePath: buffer too small; had {}, needed {}", nPathBufSize, nPathSize);
+		return 0;
+	}
+
+	if ((res = StringCchPrintf(
+		szNewPathW,
+		2048,
+		TEXT("%s;%s"),
+		szPathW,
+		szLauncherDirW
+	)) != S_OK) {
+		StringCchPrintfW(
+			szErrorStringW,
+			nErrorStringLen,
+			L"Could not create new PATH environment variable %s;%s : %d",
+			szPathW,
+			szLauncherDirW,
+			res
+		);
+		MessageBoxW(NULL, szErrorStringW, NULL, MB_OK);
+		return 0;
+	}
+	SetEnvironmentVariableW(L"PATH", szNewPathW);
+	return 1;
+}
+
 int WINAPI wWinMain(
 	_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -296,32 +343,9 @@ int WINAPI wWinMain(
 	WideCharToMultiByte(CP_ACP, 0, szLauncherDirW, 1024, szLauncherDirA, 1024, NULL, NULL);
 	PathCombineA(szSidecarDllPathA, szLauncherDirA, "Sidecar.dll");
 
-	// Modify PATH to contain the launcher's directory. While this isn't that
-	// useful for the launcher itself, child processes inherit the parent's
-	// environment by default, so the child SF4 process will search in the
-	// launcher directory for DLLs.
-	wchar_t szPathW[2048] = { 0 };
-	wchar_t szNewPathW[2048] = { 0 };
-	GetEnvironmentVariableW(L"PATH", szPathW, 2048);
-	if ((res = StringCchPrintf(
-		szNewPathW,
-		2048,
-		TEXT("%s;%s"),
-		szPathW,
-		szLauncherDirW
-	)) != S_OK) {
-		StringCchPrintfW(
-			szErrorStringW,
-			4096,
-			L"Could not create new PATH environment variable %s;%s : %d",
-			szPathW,
-			szLauncherDirW,
-			res
-		);
-		MessageBoxW(NULL, szErrorStringW, NULL, MB_OK);
-		return -1;
+	if (!UpdatePath(szLauncherDirW, szErrorStringW, 4096)) {
+		return 1;
 	}
-	SetEnvironmentVariableW(L"PATH", szNewPathW);
 
 	if (!FindSF4(szGameDirectory, 1024, szExePath, 1024)) {
 		MessageBoxW(NULL, L"Cannot find Street Fighter 4: check logs for debugging", NULL, MB_OK);
