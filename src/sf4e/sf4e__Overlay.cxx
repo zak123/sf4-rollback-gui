@@ -2008,7 +2008,7 @@ void Overlay::InitializeOverlay(HWND hWnd, IDirect3DDevice9* lpDevice) {
 	ImGui::StyleColorsDark();
 	ImGuiStyle& style = ImGui::GetStyle();
 	style.Alpha = DEFAULT_ALPHA;
-	ImGui::GetIO().SetPlatformImeDataFn = nullptr;
+	ImGui::GetPlatformIO().Platform_SetImeDataFn = nullptr;
 	ImGui_ImplWin32_Init(hWnd);
 	ImGui_ImplDX9_Init(lpDevice);
 	fMainMenu::OnModeSelectedOverride = OnMainMenuModeSelected;

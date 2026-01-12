@@ -20,7 +20,7 @@
     },
     {
       "name": "imgui",
-      "version>=": "1.90.7",
+      "version>=": "1.91.5",
       "features": [
         "dx9-binding",
         "win32-binding"
@@ -42,5 +42,5 @@
       "version>=": "1.0.0#1"
     }
   ],
-  "builtin-baseline": "f7423ee180c4b7f40d43402c2feb3859161ef625"
+  "builtin-baseline": "fafcc0e93bfba303e5e48790def745d27e6d449b"
 }
