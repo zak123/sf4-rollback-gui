@@ -51,14 +51,15 @@ void fPlatform::Install() {
 
 void fD3D::Install() {
     void (fD3D:: * _fDestroy)() = &Destroy;
-    DWORD (fD3D:: * _fReset)() = &Reset;
+    DWORD(fD3D:: * _fReset)() = &Reset;
+    void(fD3D:: * _fRunScene_Render)(void*) = &RunScene_Render;
     DetourAttach((PVOID*)&rD3D::privateMethods.Destroy, *(PVOID*)&_fDestroy);
     DetourAttach((PVOID*)&rD3D::privateMethods.Reset, *(PVOID*)&_fReset);
-    DetourAttach((PVOID*)&rD3D::staticMethods.RunD3DOperations, RunD3DOperations);
+    DetourAttach((PVOID*)&rD3D::privateMethods.RunScene_Render, *(PVOID*)&_fRunScene_Render);
 }
 
-void WINAPI fD3D::RunD3DOperations(void* data) {
-    rD3D::staticMethods.RunD3DOperations(data);
+void fD3D::RunScene_Render(void* sceneCommandList) {
+    (this->*rD3D::privateMethods.RunScene_Render)(sceneCommandList);
     Overlay::DrawOverlay();
 }
 

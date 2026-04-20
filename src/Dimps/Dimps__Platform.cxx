@@ -59,7 +59,7 @@ void D3D::Locate(HMODULE peRoot) {
     unsigned int peRootOffset = (unsigned int)peRoot;
     *(PVOID*)&privateMethods.Destroy = (PVOID)(peRootOffset + 0x372820);
     *(PVOID*)&privateMethods.Reset = (PVOID)(peRootOffset + 0x3725b0);
-    staticMethods.RunD3DOperations = (void(WINAPI*)(void*))(peRootOffset + 0x370cc0);
+    *(PVOID*)&privateMethods.RunScene_Render = (PVOID)(peRootOffset + 0x370cc0);
     staticMethods.GetSingleton = (D3D * (WINAPI*)())(peRootOffset + 0x371180);
 }
 

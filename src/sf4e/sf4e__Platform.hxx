@@ -15,7 +15,7 @@ namespace sf4e {
 
 			void Destroy();
 			DWORD Reset();
-			static void WINAPI RunD3DOperations(void* arg1);
+			void RunScene_Render(void* sceneCommandList);
 		};
 
 		struct GFxApp : Dimps::Platform::GFxApp

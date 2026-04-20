@@ -82,6 +82,7 @@ namespace Dimps {
 			typedef struct __privateMethods {
 				void(D3D::* Destroy)();
 				DWORD (D3D::* Reset)();
+				void (D3D::* RunScene_Render)(void* pList);
 			} __privateMethods;
 
 			typedef struct __publicMethods {
@@ -89,7 +90,6 @@ namespace Dimps {
 			} __publicMethods;
 
 			typedef struct __staticMethods {
-				void (WINAPI* RunD3DOperations)(void* arg1);
 				D3D* (WINAPI* GetSingleton)();
 			} __staticMethods;
 
