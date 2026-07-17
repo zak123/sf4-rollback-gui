@@ -227,7 +227,18 @@ void fUserApp::Install() {
     DetourAttach((PVOID*)&rUserApp::staticMethods.Steam_PostUpdate, Steam_PostUpdate);
 }
 
-void fUserApp::StartSession(char* joinAddr, uint16_t port, std::string& sidecarHash, std::string& name, uint8_t deviceType, uint8_t deviceIdx, uint8_t delay) {
+void fUserApp::StartSession(
+    char* joinAddr,
+    uint16_t port,
+    std::string& sidecarHash,
+    std::string& name,
+    uint8_t deviceType,
+    uint8_t deviceIdx,
+    uint8_t delay,
+    const char* lobbyHost,
+    const char* lobbyKey,
+    const char* handoffToken
+) {
     SteamNetworkingIPAddr addr;
     addr.Clear();
     addr.ParseString(joinAddr);
@@ -240,6 +251,8 @@ void fUserApp::StartSession(char* joinAddr, uint16_t port, std::string& sidecarH
         deviceIdx,
         delay
     ));
+    netplay->client._autoJoinLobby = { lobbyHost, lobbyKey };
+    netplay->client._autoJoinHandoff = handoffToken;
     netplay->client.Connect(addr);
 }
 

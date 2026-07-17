@@ -88,6 +88,8 @@ struct App {
 	std::deque<std::string> alerts;
 	uint64_t nextListRefresh = 0;
 	bool bothReady = false;
+	bool gameLaunched = false;
+	uint16_t ggpoPort = 23457;
 
 	std::mt19937 rand;
 
@@ -161,6 +163,53 @@ static void OnChat(const SessionProtocol::ChatEvent& event, SessionClient* const
 	}
 }
 
+// The server issued this app's seat a handoff token: launch the game
+// with the join parameters so it can take the seat and start the match.
+static void OnMatchHandoff(const SessionProtocol::MatchHandoff& handoff, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	wchar_t szDir[MAX_PATH] = { 0 };
+	wchar_t szLauncher[MAX_PATH] = { 0 };
+	GetModuleFileNameW(NULL, szDir, MAX_PATH);
+	PathRemoveFileSpecW(szDir);
+	PathCombineW(szLauncher, szDir, L"Launcher.exe");
+	if (!PathFileExistsW(szLauncher)) {
+		g_app.alerts.push_back("Match is ready, but Launcher.exe isn't next to this app!");
+		return;
+	}
+
+	char cmdA[1024];
+	snprintf(
+		cmdA,
+		sizeof(cmdA),
+		"\"%ws\" --join-server \"%s\" --join-lobby-host \"%s\" --join-lobby-key \"%s\" --join-token \"%s\" --join-name \"%s\" --ggpo-port %u",
+		szLauncher,
+		g_app.szServerAddr,
+		handoff.lobby.host.c_str(),
+		handoff.lobby.key.c_str(),
+		handoff.token.c_str(),
+		c->_name.c_str(),
+		(unsigned)g_app.ggpoPort
+	);
+	wchar_t cmdW[1024];
+	MultiByteToWideChar(CP_UTF8, 0, cmdA, -1, cmdW, 1024);
+
+	STARTUPINFOW si;
+	PROCESS_INFORMATION pi;
+	ZeroMemory(&si, sizeof(si));
+	ZeroMemory(&pi, sizeof(pi));
+	si.cb = sizeof(si);
+	if (CreateProcessW(szLauncher, cmdW, NULL, NULL, FALSE, 0, NULL, szDir, &si, &pi)) {
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+		g_app.gameLaunched = true;
+		g_app.alerts.push_back("Match ready- launching the game! Press a button in-game to bind your controller.");
+		spdlog::info("Launched game for lobby {} handoff", handoff.lobby.key);
+	}
+	else {
+		g_app.alerts.push_back("Match is ready, but the game could not be launched");
+		spdlog::error("CreateProcess for Launcher.exe failed: {}", GetLastError());
+	}
+}
+
 static SessionClient::Callbacks kCallbacks = {
 	nullptr,
 	OnError,
@@ -169,6 +218,7 @@ static SessionClient::Callbacks kCallbacks = {
 	OnLobbyCreated,
 	OnLobbyList,
 	OnChat,
+	OnMatchHandoff,
 };
 
 // -------------------------------------------------------------------
@@ -183,7 +233,7 @@ static void ConnectToServer() {
 	}
 
 	std::string name(g_app.szName);
-	g_app.client.reset(new SessionClient(kCallbacks, std::string(""), 23457, name));
+	g_app.client.reset(new SessionClient(kCallbacks, std::string(""), g_app.ggpoPort, name));
 	g_app.client->Connect(addr);
 
 	// Snapshot reconciliation walks located game memory that only exists
@@ -348,11 +398,15 @@ static void DrawLobbyPanel() {
 	ImGui::Separator();
 
 	if (g_app.bothReady) {
-		ImGui::TextWrapped(
-			"Both players are ready! Launching the game from here lands in the "
-			"next milestone- for now, start the match by joining this server "
-			"from the in-game sf4e network window."
-		);
+		if (g_app.gameLaunched) {
+			ImGui::TextWrapped(
+				"Game launched! Press a button on your controller at the "
+				"title screen to bind it, then the match starts on its own."
+			);
+		}
+		else {
+			ImGui::TextWrapped("Both players are ready! Waiting for the game to launch...");
+		}
 		return;
 	}
 
@@ -542,10 +596,12 @@ int WINAPI wWinMain(
 	std::string autoConnect;
 	std::string autoName;
 
+	int nGgpoPort = 23457;
 	CLI::App app("sf4e lobby client", "LobbyClient");
 	app.add_flag("--console", bShowConsole, "Show a console with live logging");
 	app.add_option("--connect", autoConnect, "Connect to this server (ip:port) on launch");
 	app.add_option("--name", autoName, "Name to connect with on launch");
+	app.add_option("--ggpo-port", nGgpoPort, "Local UDP port the launched game uses for GGPO traffic")->check(CLI::Range(1024, 65535));
 	int argc;
 	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 	CLI11_PARSE(app, argc, argv);
@@ -559,6 +615,7 @@ int WINAPI wWinMain(
 		return 1;
 	}
 
+	g_app.ggpoPort = (uint16_t)nGgpoPort;
 	if (!autoName.empty()) {
 		strncpy_s(g_app.szName, autoName.c_str(), _TRUNCATE);
 	}

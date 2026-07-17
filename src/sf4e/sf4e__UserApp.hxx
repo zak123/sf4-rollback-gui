@@ -35,7 +35,18 @@ namespace sf4e {
 
         static void Install();
         static void Steam_PostUpdate();
-        static void StartSession(char* joinAddr, uint16_t port, std::string& sidecarHash, std::string& name, uint8_t deviceType, uint8_t deviceIdx, uint8_t delay);
+        static void StartSession(
+            char* joinAddr,
+            uint16_t port,
+            std::string& sidecarHash,
+            std::string& name,
+            uint8_t deviceType,
+            uint8_t deviceIdx,
+            uint8_t delay,
+            const char* lobbyHost = "",
+            const char* lobbyKey = "",
+            const char* handoffToken = ""
+        );
         static void StartServer(uint16 hostPort, std::string& identity, std::string& sidecarHash, bool editionSelect, int roundCount, Dimps::Math::FixedPoint roundTime);
         static void _OnVsPreBattleTasksRegistered();
         static void _OnVsBattleTasksRegistered();

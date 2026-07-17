@@ -315,8 +315,22 @@ int WINAPI wWinMain(
 	};
 
 	sf4e::Args args;
+	std::string joinServer;
+	std::string joinLobbyHost;
+	std::string joinLobbyKey;
+	std::string joinToken;
+	std::string joinName;
+	int nGgpoPort = 23457;
+	int nDelay = 1;
 	CLI::App app("A process-inspection and modification tool for the Steam release of Ultra Street Fighter 4.", "sf4e");
 	app.add_flag("--console", args.bShowConsole, "Show a console with live logging. The console may interfere with inputs to the main window.");
+	app.add_option("--join-server", joinServer, "Session server (ip:port) to auto-join for a match");
+	app.add_option("--join-lobby-host", joinLobbyHost, "Host half of the lobby ID to take a seat in");
+	app.add_option("--join-lobby-key", joinLobbyKey, "Key half of the lobby ID to take a seat in");
+	app.add_option("--join-token", joinToken, "One-shot seat handoff token issued by the server");
+	app.add_option("--join-name", joinName, "Display name matching the seat being taken over");
+	app.add_option("--ggpo-port", nGgpoPort, "Local UDP port for GGPO traffic")->check(CLI::Range(1024, 65535));
+	app.add_option("--delay", nDelay, "GGPO input delay in frames")->check(CLI::Range(0, 10));
 	int argc;
 	LPWSTR* argv = CommandLineToArgvW(
 		// Intentionally do _not_ use lpCmdLine here. Windows removes
@@ -333,6 +347,17 @@ int WINAPI wWinMain(
 		&argc
 	);
 	CLI11_PARSE(app, argc, argv);
+
+	if (!joinServer.empty() && !joinLobbyKey.empty() && !joinToken.empty() && !joinName.empty()) {
+		args.bAutoJoin = true;
+		StringCchCopyA(args.szServerAddr, sizeof(args.szServerAddr), joinServer.c_str());
+		StringCchCopyA(args.szLobbyHost, sizeof(args.szLobbyHost), joinLobbyHost.c_str());
+		StringCchCopyA(args.szLobbyKey, sizeof(args.szLobbyKey), joinLobbyKey.c_str());
+		StringCchCopyA(args.szHandoffToken, sizeof(args.szHandoffToken), joinToken.c_str());
+		StringCchCopyA(args.szName, sizeof(args.szName), joinName.c_str());
+		args.nGgpoPort = (uint16_t)nGgpoPort;
+		args.nDelay = (uint8_t)nDelay;
+	}
 
 	// Compute the path to the sidecar DLL based on the launcher's directory.
 	// Ideally, this wouldn't have to convert from wide-char to multibyte in

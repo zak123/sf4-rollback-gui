@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <random>
 #include <string>
 #include <windows.h>
@@ -7,8 +8,23 @@
 #include "../Dimps/Dimps__Eva.hxx"
 
 namespace sf4e {
+	// Args crosses process boundaries inside the Detours payload, so it
+	// must stay trivially copyable with fixed-size buffers.
 	typedef struct Args {
 		bool bShowConsole = false;
+
+		// Auto-join, set by the launcher's --join-* flags: once the
+		// player captures a device, the sidecar connects to the session
+		// server and presents the handoff token to take over the seat
+		// its lobby app reserved.
+		bool bAutoJoin = false;
+		char szServerAddr[64] = { 0 };
+		char szLobbyHost[64] = { 0 };
+		char szLobbyKey[64] = { 0 };
+		char szHandoffToken[64] = { 0 };
+		char szName[32] = { 0 };
+		uint16_t nGgpoPort = 23457;
+		uint8_t nDelay = 1;
 	} Args;
 
 	typedef struct Payload {

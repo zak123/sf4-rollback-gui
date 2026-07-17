@@ -1094,6 +1094,39 @@ void DrawNetworkWindow(bool* pOpen) {
 			}
 			break;
 		case NWS_DECIDE:
+			if (sf4e::args.bAutoJoin && !fUserApp::netplay && !fUserApp::server) {
+				// A lobby app launched this process to take a seat in an
+				// agreed match. Session work can only start from the main
+				// menu (the ready flow navigates the menu into versus),
+				// so wait for it, then connect with the launcher's join
+				// parameters and the captured device.
+				char* mainMenuQuery[1] = { "MainMenu" };
+				rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(
+					App::GetRootEvent(),
+					mainMenuQuery,
+					1
+				);
+				if (mainMenu) {
+					std::string name(sf4e::args.szName);
+					fUserApp::StartSession(
+						sf4e::args.szServerAddr,
+						sf4e::args.nGgpoPort,
+						sf4e::sidecarHash,
+						name,
+						deviceType,
+						deviceIdx,
+						sf4e::args.nDelay,
+						sf4e::args.szLobbyHost,
+						sf4e::args.szLobbyKey,
+						sf4e::args.szHandoffToken
+					);
+					netState = NWS_JOIN;
+				}
+				else {
+					Text("Match found! Head to the main menu to connect.");
+				}
+				break;
+			}
 			if (Button("Host a game")) {
 				netState = NWS_HOST;
 			}
