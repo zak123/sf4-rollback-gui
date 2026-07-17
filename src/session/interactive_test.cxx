@@ -276,7 +276,7 @@ void CleanupDeviceD3D();
 void ResetDevice();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-void DrawServerSessionInfo(const std::vector<SessionServer::SessionMember>& clients, const MatchData& matchData) {
+void DrawServerSessionInfo(const std::vector<sf4e::LobbyMember>& clients, const MatchData& matchData) {
     Text("RNG seed: %d", matchData.rngSeed);
     Text("Stage ID: %d", matchData.stageID);
     for (int i = 0; i < 2; i++) {
@@ -324,7 +324,10 @@ int DrawServerWindow() {
     );
     Text("Server window");
     if (g_server) {
-        DrawServerSessionInfo(g_server->clients, g_server->_matchData);
+        sf4e::Lobby* defaultLobby = g_server->GetDefaultLobby();
+        if (defaultLobby) {
+            DrawServerSessionInfo(defaultLobby->members, defaultLobby->match);
+        }
         ImGui::InputText("Sidecar hash", nextClientHash, 4);
         if (Button("Create new client")) {
             char szNewClientName[32];

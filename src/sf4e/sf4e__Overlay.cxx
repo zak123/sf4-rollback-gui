@@ -1110,15 +1110,25 @@ void DrawNetworkWindow(bool* pOpen) {
 			}
 			else {
 				if (bDebug) {
-					Text("Server initialized, client map:");
-					for (auto iter = fUserApp::server->clients.begin(); iter != fUserApp::server->clients.end(); iter++) {
+					Text("Server initialized, lobbies:");
+					for (auto lobbyIter = fUserApp::server->registry.lobbies.begin(); lobbyIter != fUserApp::server->registry.lobbies.end(); lobbyIter++) {
+						sf4e::Lobby& lobby = lobbyIter->second;
 						Text(
-							"%x %s@%s %s",
-							iter->conn,
-							iter->data.connId.user.c_str(),
-							iter->data.connId.host.c_str(),
-							iter->data.name.c_str()
+							"%s \"%s\" (%d/%d)",
+							lobby.id.key.c_str(),
+							lobby.displayName.c_str(),
+							(int)lobby.members.size(),
+							(int)lobby.capacity
 						);
+						for (auto iter = lobby.members.begin(); iter != lobby.members.end(); iter++) {
+							Text(
+								"  %x %s@%s %s",
+								iter->conn,
+								iter->data.connId.user.c_str(),
+								iter->data.connId.host.c_str(),
+								iter->data.name.c_str()
+							);
+						}
 					}
 				}
 				if (fUserApp::netplay) {

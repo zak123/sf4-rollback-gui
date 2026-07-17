@@ -209,13 +209,34 @@ int SessionClient::Step()
 			case SessionProtocol::JoinResult::JR_REQUEST_INVALID:
 				errType = ErrorType::SCE_JOIN_REJECTED_REQUEST_INVALID;
 				break;
+			case SessionProtocol::JoinResult::JR_NOT_REGISTERED:
+				errType = ErrorType::SCE_JOIN_REJECTED_NOT_REGISTERED;
+				break;
+			case SessionProtocol::JoinResult::JR_ALREADY_IN_LOBBY:
+				errType = ErrorType::SCE_JOIN_REJECTED_ALREADY_IN_LOBBY;
+				break;
+			case SessionProtocol::JoinResult::JR_NO_SUCH_LOBBY:
+				errType = ErrorType::SCE_JOIN_REJECTED_NO_SUCH_LOBBY;
+				break;
 			default:
 				break;
 			}
 			_callbacks.OnError(errType, this, _callbacks);
-			_interface->CloseConnection(_conn, 0, nullptr, false);
-			_conn = k_HSteamNetConnection_Invalid;
-			return -1;
+
+			// Registration-identity failures are fatal to the whole
+			// session: this connection will never be admitted, so close
+			// it, matching the behavior from when a join rejection was
+			// the only possible rejection. Lobby-level rejections
+			// (full, nonexistent, already seated) leave the session
+			// connected- the user can pick another lobby.
+			if (
+				reject.result == SessionProtocol::JR_HASH_INVALID ||
+				reject.result == SessionProtocol::JR_NAME_TAKEN
+			) {
+				_interface->CloseConnection(_conn, 0, nullptr, false);
+				_conn = k_HSteamNetConnection_Invalid;
+				return -1;
+			}
 		}
 		else if (type == SessionProtocol::MT_SESSION_DATAUPDATE) {
 			SessionProtocol::SessionDataUpdate update;
@@ -239,6 +260,38 @@ int SessionClient::Step()
 						break;
 					}
 				}
+			}
+		}
+		else if (type == SessionProtocol::MT_LOBBY_CREATE_RESP) {
+			SessionProtocol::LobbyCreateResp resp;
+			try {
+				msg.get_to(resp);
+			}
+			catch (json::exception e) {
+				spdlog::info("Client: could not deserialize lobby create response");
+				continue;
+			}
+
+			if (_callbacks.OnLobbyCreated) {
+				_callbacks.OnLobbyCreated(resp.result, this, _callbacks);
+			}
+			else if (resp.result != SessionProtocol::JOIN_OK) {
+				spdlog::warn("Client: lobby create rejected, reason {}", (int)resp.result);
+			}
+		}
+		else if (type == SessionProtocol::MT_LOBBY_LIST_RESP) {
+			SessionProtocol::LobbyListResp resp;
+			try {
+				msg.get_to(resp);
+			}
+			catch (json::exception e) {
+				spdlog::info("Client: could not deserialize lobby list response");
+				continue;
+			}
+
+			_lobbyListing = resp.lobbies;
+			if (_callbacks.OnLobbyList) {
+				_callbacks.OnLobbyList(this, _callbacks);
 			}
 		}
 		else if (type == SessionProtocol::MT_LOBBY_ALLREADY) {
@@ -421,6 +474,58 @@ EResult SessionClient::Send(nlohmann::json& msg, int64_t* outMessageNum) {
 		_conn, buf.c_str(), (uint32)buf.length(),
 		k_nSteamNetworkingSend_Reliable, outMessageNum
 	);
+}
+
+EResult SessionClient::Lobby_Create(const std::string& name, bool editionSelect, int32_t roundCount, Dimps::Math::FixedPoint roundTime)
+{
+	SessionProtocol::LobbyCreate msg;
+	msg.name = name;
+	msg.editionSelect = editionSelect;
+	msg.roundCount = roundCount;
+	msg.roundTime = roundTime;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not send lobby create! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Lobby_RequestList()
+{
+	SessionProtocol::LobbyListRequest msg;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not send lobby list request! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Lobby_Join(const SessionProtocol::LobbyID& id)
+{
+	SessionProtocol::SessionJoinRequest msg;
+	msg.sidecarHash = _sidecarHash;
+	msg.username = _name;
+	msg.port = _ggpoPort;
+	msg.lobby = id;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not send lobby join! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Lobby_Leave()
+{
+	SessionProtocol::LobbyLeave msg;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not send lobby leave! Result: {}", (int)result);
+	}
+	return result;
 }
 
 EResult SessionClient::Lobby_Ready()

@@ -63,6 +63,11 @@ namespace sf4e {
 
 		struct LobbyData {
 			LobbyID id;
+
+			// A user-provided display name for the lobby, ex. for
+			// lobby-browser listings.
+			std::string name;
+
 			bool editionSelect;
 			int roundCount;
 			FixedPoint roundTime;
@@ -103,6 +108,12 @@ namespace sf4e {
 			MT_BATTLE_SNAPSHOT,
 
 			MT_FORWARD,
+
+			MT_LOBBY_CREATE,
+			MT_LOBBY_CREATE_RESP,
+			MT_LOBBY_LIST,
+			MT_LOBBY_LIST_RESP,
+			MT_LOBBY_LEAVE,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(MessageType, {
@@ -125,6 +136,12 @@ namespace sf4e {
 			{MT_BATTLE_SNAPSHOT, "battle_snapshot"},
 
 			{MT_FORWARD, "forward"},
+
+			{MT_LOBBY_CREATE, "lobby_create"},
+			{MT_LOBBY_CREATE_RESP, "lobby_create_resp"},
+			{MT_LOBBY_LIST, "lobby_list"},
+			{MT_LOBBY_LIST_RESP, "lobby_list_resp"},
+			{MT_LOBBY_LEAVE, "lobby_leave"},
 		})
 
 		enum JoinResult {
@@ -133,6 +150,9 @@ namespace sf4e {
 			JR_LOBBY_FULL = 2,
 			JR_NAME_TAKEN = 3,
 			JR_HASH_INVALID = 4,
+			JR_NOT_REGISTERED = 5,
+			JR_ALREADY_IN_LOBBY = 6,
+			JR_NO_SUCH_LOBBY = 7,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(JoinResult, {
@@ -140,7 +160,10 @@ namespace sf4e {
 			{JR_REQUEST_INVALID, "request_invalid"},
 			{JR_LOBBY_FULL, "lobby_full"},
 			{JR_NAME_TAKEN, "name_taken"},
-			{JR_HASH_INVALID, "hash_invalid"}
+			{JR_HASH_INVALID, "hash_invalid"},
+			{JR_NOT_REGISTERED, "not_registered"},
+			{JR_ALREADY_IN_LOBBY, "already_in_lobby"},
+			{JR_NO_SUCH_LOBBY, "no_such_lobby"}
 		})
 
 		struct SessionHelloMsg {
@@ -169,6 +192,54 @@ namespace sf4e {
 			std::string sidecarHash;
 			std::string username;
 			uint16_t port;
+
+			// Which lobby to take a seat in. The null lobby ID means
+			// "server default": servers hosting a default lobby (ex. an
+			// in-game host) seat the sender there, and dedicated servers
+			// leave the sender registered-but-unseated, in the lounge.
+			LobbyID lobby = { "", "" };
+
+			// One-shot token authorizing this connection to take over a
+			// seat already held under the same name, ex. a game process
+			// taking over from the lobby app that launched it. Unused
+			// until match handoff lands; carried now so the message shape
+			// is stable.
+			std::string handoff;
+		};
+
+		struct LobbyCreate {
+			MessageType type = MT_LOBBY_CREATE;
+			std::string name;
+			bool editionSelect = true;
+			int32_t roundCount = 3;
+			FixedPoint roundTime = { 0, 99 };
+		};
+
+		struct LobbyCreateResp {
+			MessageType type = MT_LOBBY_CREATE_RESP;
+			JoinResult result = JOIN_OK;
+			LobbyID lobby = { "", "" };
+		};
+
+		struct LobbyListEntry {
+			LobbyID id = { "", "" };
+			std::string name;
+			int32_t playerCount = 0;
+			int32_t capacity = 0;
+			std::vector<std::string> players;
+		};
+
+		struct LobbyListRequest {
+			MessageType type = MT_LOBBY_LIST;
+		};
+
+		struct LobbyListResp {
+			MessageType type = MT_LOBBY_LIST_RESP;
+			std::vector<LobbyListEntry> lobbies;
+		};
+
+		struct LobbyLeave {
+			MessageType type = MT_LOBBY_LEAVE;
 		};
 
 		struct LobbyReady {
@@ -248,14 +319,43 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyID, host, key);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MemberData, connId, name, ip, port);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, id, editionSelect, roundCount, roundTime, members);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, id, name, editionSelect, roundCount, roundTime, members);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionHelloMsg, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionHelloResp, type, cid);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionDataUpdate, type, lobbyData, matchData);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinReject, type, result);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinRequest, type, sidecarHash, username, port);
+
+		// SessionJoinRequest is serialized by hand: `lobby` and `handoff`
+		// are optional on the wire so join requests from builds predating
+		// them still parse.
+		inline void to_json(nlohmann::json& j, const SessionJoinRequest& r) {
+			j = nlohmann::json{
+				{"type", r.type},
+				{"sidecarHash", r.sidecarHash},
+				{"username", r.username},
+				{"port", r.port},
+				{"lobby", r.lobby},
+				{"handoff", r.handoff},
+			};
+		}
+
+		inline void from_json(const nlohmann::json& j, SessionJoinRequest& r) {
+			j.at("type").get_to(r.type);
+			j.at("sidecarHash").get_to(r.sidecarHash);
+			j.at("username").get_to(r.username);
+			j.at("port").get_to(r.port);
+			r.lobby = j.value("lobby", LobbyID{ "", "" });
+			r.handoff = j.value("handoff", std::string());
+		}
+
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyCreate, type, name, editionSelect, roundCount, roundTime);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyCreateResp, type, result, lobby);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyListEntry, id, name, playerCount, capacity, players);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyListRequest, type);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyListResp, type, lobbies);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyLeave, type);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyReady, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyAllReady, type);

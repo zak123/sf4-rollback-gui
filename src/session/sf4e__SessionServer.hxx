@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "../Dimps/Dimps__Math.hxx"
+#include "sf4e__LobbyRegistry.hxx"
 #include "sf4e__SessionProtocol.hxx"
 
 namespace sf4e {
@@ -34,25 +35,38 @@ namespace sf4e {
 		HSteamNetPollGroup _pollGroup;
 		ISteamNetworkingSockets* _interface;
 
+		// The registry key of the default lobby, if this server was
+		// constructed with one. Empty in dedicated mode. Tracked
+		// explicitly- a user-created lobby can coincidentally hold any
+		// key, so key values alone can't identify the default lobby.
+		std::string _defaultLobbyKey;
+
 		// Connection callbacks and message utilities
 		static SessionServer* s_pCallbackInstance;
 		static void SteamNetConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t* pInfo);
 		void OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* pInfo);
-		void BroadcastMessage(nlohmann::json& msg);
+		void BroadcastToLobby(Lobby& lobby, nlohmann::json& msg);
 		void Respond(HSteamNetConnection client, nlohmann::json& msg);
+		void RespondNullLobbyUpdate(HSteamNetConnection client);
+		void RespondJoinReject(HSteamNetConnection client, SessionProtocol::JoinResult result);
 
 		// Direct lobby data manipulation utilities
-		SessionProtocol::JoinResult RegisterToWait(
-			const HSteamNetConnection& conn,
-			const uint16_t& port,
-			const std::string& sidecarHash,
-			const std::string& name,
-			const SteamNetworkingIPAddr& peerAddr,
-			SessionProtocol::ConnectionID& cid
-		);
-		void HandleResults(int loserSide);
+		void SeatInLobby(HSteamNetConnection conn, Lobby& lobby);
+		void RemoveFromLobby(HSteamNetConnection conn);
+		void HandleResults(Lobby& lobby, int loserSide);
 
 	public:
+		// Hosts no lobbies at startup: every lobby is created by a
+		// client, and clients joining without naming a lobby stay in
+		// the lounge. This is the dedicated-server mode.
+		SessionServer(
+			std::string identity,
+			std::string sidecarHash
+		);
+
+		// Hosts a persistent default lobby with the given settings, and
+		// clients joining without naming a lobby are seated there. This
+		// matches the behavior in-game hosts and existing clients expect.
 		SessionServer(
 			std::string identity,
 			std::string sidecarHash,
@@ -69,17 +83,19 @@ namespace sf4e {
 		void PrepareForCallbacks();
 		void ResetBattleSync();
 
-		typedef struct SessionMember {
+		Lobby* GetDefaultLobby();
+
+		// A user that has said hello and successfully registered a name
+		// with a join request. Peers may or may not be seated in a lobby;
+		// `lobbyKey` is empty for peers idling in the lounge.
+		typedef struct Peer {
 			SessionProtocol::MemberData data;
-			HSteamNetConnection conn;
-		} SessionMember;
+			std::string lobbyKey;
+		} Peer;
 
+		// Public for visibility into tests only.
 		std::map<HSteamNetConnection, SessionProtocol::ConnectionID> cidMap;
-		std::vector<SessionMember> clients;
-
-		// Lobby data: Public for visibility into tests only.
-		bool _dataDirty;
-		SessionProtocol::LobbyData _lobbyData;
-		SessionProtocol::MatchData _matchData;
+		std::map<HSteamNetConnection, Peer> peers;
+		LobbyRegistry registry;
 	};
 }

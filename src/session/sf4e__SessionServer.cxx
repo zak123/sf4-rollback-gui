@@ -11,6 +11,7 @@
 #include "../Dimps/Dimps__GameEvents.hxx"
 #include "../Dimps/Dimps__Math.hxx"
 
+#include "sf4e__LobbyRegistry.hxx"
 #include "sf4e__SessionProtocol.hxx"
 #include "sf4e__SessionServer.hxx"
 
@@ -18,26 +19,36 @@ using nlohmann::json;
 
 namespace SessionProtocol = sf4e::SessionProtocol;
 using Dimps::Math::FixedPoint;
+using sf4e::Lobby;
+using sf4e::LobbyMember;
 using sf4e::SessionServer;
 
 
 const int sf4e::SESSION_SERVER_MAX_MESSAGES_PER_POLL = 200;
 SessionServer* SessionServer::s_pCallbackInstance;
 
-SessionServer::SessionServer(std::string identity, std::string sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) :
+SessionServer::SessionServer(std::string identity, std::string sidecarHash) :
 	_identity(identity),
 	_sidecarHash(sidecarHash),
 	_interface(SteamNetworkingSockets()),
-	_dataDirty(false),
-	_lobbyData(SessionProtocol::LobbyData::NULL_LOBBY),
-	_listenSock(k_HSteamListenSocket_Invalid)
+	_listenSock(k_HSteamListenSocket_Invalid),
+	registry(identity)
 {
-	_lobbyData.id = { _identity, "1" };
-	_lobbyData.editionSelect = editionSelect;
-	_lobbyData.roundCount = roundCount;
-	_lobbyData.roundTime = roundTime;
-	clients.reserve(MAX_SF4E_PROTOCOL_USERS + 1);
 	_pollGroup = _interface->CreatePollGroup();
+}
+
+SessionServer::SessionServer(std::string identity, std::string sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) :
+	SessionServer(identity, sidecarHash)
+{
+	Lobby* defaultLobby = registry.Create(
+		"main",
+		editionSelect,
+		roundCount,
+		roundTime,
+		MAX_SF4E_PROTOCOL_USERS,
+		true
+	);
+	_defaultLobbyKey = defaultLobby->id.key;
 }
 
 SessionServer::~SessionServer()
@@ -48,11 +59,18 @@ SessionServer::~SessionServer()
 	}
 }
 
+Lobby* SessionServer::GetDefaultLobby() {
+	if (_defaultLobbyKey.empty()) {
+		return nullptr;
+	}
+	return registry.FindByKey(_defaultLobbyKey);
+}
+
 void SessionServer::AddConnection(HSteamNetConnection newConn) {
 	// XXX (adanducci): It is absolutely critical to note that
 	// `SetConfigValue`'s interface to set callbacks is _not_ the
 	// same as the one used by `CreateListenSocketIP`/`SteamNetworkingConfigValue_t`.
-	// 
+	//
 	// Per the documentation for `SetConfigValue` and the header comment @
 	// https://github.com/ValveSoftware/GameNetworkingSockets/blob/62b395172f157ca4f01eea3387d1131400f8d604/include/steam/isteamnetworkingutils.h#L296-L307 :
 	//
@@ -93,8 +111,6 @@ int SessionServer::Step()
 {
 	ISteamNetworkingMessage* pIncomingMsgs[SESSION_SERVER_MAX_MESSAGES_PER_POLL] = { 0 };
 	int numMsgs = _interface->ReceiveMessagesOnPollGroup(_pollGroup, pIncomingMsgs, SESSION_SERVER_MAX_MESSAGES_PER_POLL);
-	bool bSendLobbyAllReady = false;
-	bool bSendBattleSynced = false;
 
 	if (numMsgs < 0) {
 		spdlog::error("Session server error checking for messages: {}", numMsgs);
@@ -132,217 +148,371 @@ int SessionServer::Step()
 		if (cidMap.find(conn) == cidMap.end()) {
 			if (type == SessionProtocol::MT_SESSION_HELLO) {
 				SessionProtocol::SessionHelloResp cidMsg;
-				SessionProtocol::ConnectionID newCid;
 				cidMsg.cid.host = _identity;
 				cidMsg.cid.user = std::to_string(conn);
 				cidMap[conn] = cidMsg.cid;
-				Respond(conn, json(cidMsg));
+				json resp = cidMsg;
+				Respond(conn, resp);
 			}
 			else {
-				spdlog::warn("Server: got unrecognized message type: {}", (int)type);
+				spdlog::warn("Server: got message type {} from a connection that hasn't said hello", (int)type);
+			}
+			continue;
+		}
+
+		SessionProtocol::ConnectionID cid = cidMap[conn];
+		auto peerIter = peers.find(conn);
+
+		if (type == SessionProtocol::MT_SESSION_JOINREQ) {
+			SessionProtocol::SessionJoinRequest request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize join request");
+				RespondJoinReject(conn, SessionProtocol::JR_REQUEST_INVALID);
+				continue;
+			}
+			spdlog::debug(
+				"Server: join request from conn {} (registered: {}) for lobby \"{}\"",
+				conn,
+				peerIter != peers.end(),
+				request.lobby.key
+			);
+
+			if (peerIter == peers.end()) {
+				// First join request from this connection: register it.
+				// An empty expected hash means "accept any build". Dedicated
+				// dev servers use this before a release hash is pinned, and
+				// connections that don't run the game (ex. lobby browsers)
+				// have no sidecar at all.
+				if (!_sidecarHash.empty() && request.sidecarHash != _sidecarHash) {
+					spdlog::info("Server: rejecting registration for bad sidecar hash");
+					RespondJoinReject(conn, SessionProtocol::JR_HASH_INVALID);
+					continue;
+				}
+
+				if (request.username.empty()) {
+					spdlog::info("Server: rejecting registration for empty username");
+					RespondJoinReject(conn, SessionProtocol::JR_REQUEST_INVALID);
+					continue;
+				}
+
+				bool nameTaken = false;
+				for (auto iter = peers.begin(); iter != peers.end(); iter++) {
+					if (iter->second.data.name == request.username) {
+						nameTaken = true;
+						break;
+					}
+				}
+				if (nameTaken) {
+					spdlog::info("Server: rejecting registration for taken name \"{}\"", request.username);
+					RespondJoinReject(conn, SessionProtocol::JR_NAME_TAKEN);
+					continue;
+				}
+
+				char peerAddrStr[SteamNetworkingIPAddr::k_cchMaxString];
+				SteamNetworkingIPAddr peerAddr = *(pIncomingMsg->m_identityPeer.GetIPAddr());
+				if (peerAddr.IsLocalHost()) {
+					peerAddrStr[0] = 0;
+				}
+				else {
+					peerAddr.ToString(peerAddrStr, SteamNetworkingIPAddr::k_cchMaxString, false);
+				}
+
+				Peer newPeer;
+				newPeer.data = { cid, request.username, peerAddrStr, request.port, 0 };
+				newPeer.lobbyKey = "";
+				peers[conn] = newPeer;
+				peerIter = peers.find(conn);
+				spdlog::info("Server: registered \"{}\" as {}@{}", request.username, cid.user, cid.host);
+			}
+
+			// Resolve which lobby, if any, the sender should be seated in.
+			// Note LobbyID's operator== treats every null-ish ID as equal.
+			Lobby* target = nullptr;
+			if (request.lobby == SessionProtocol::LobbyID::NULL_LOBBY_ID) {
+				target = GetDefaultLobby();
+			}
+			else {
+				target = registry.FindByKey(request.lobby.key);
+				if (!target) {
+					spdlog::info("Server: \"{}\" asked to join nonexistent lobby {}", peerIter->second.data.name, request.lobby.key);
+					RespondJoinReject(conn, SessionProtocol::JR_NO_SUCH_LOBBY);
+					continue;
+				}
+			}
+
+			if (target) {
+				if (!peerIter->second.lobbyKey.empty()) {
+					RespondJoinReject(conn, SessionProtocol::JR_ALREADY_IN_LOBBY);
+					continue;
+				}
+				if (target->IsFull()) {
+					RespondJoinReject(conn, SessionProtocol::JR_LOBBY_FULL);
+					continue;
+				}
+				SeatInLobby(conn, *target);
+			}
+			else {
+				// No lobby to seat in- the sender idles in the lounge.
+				// Acknowledge with a null-lobby update so the client knows
+				// registration succeeded.
+				RespondNullLobbyUpdate(conn);
+			}
+		}
+		else if (peerIter == peers.end()) {
+			spdlog::warn("Server: got message type {} from a connection that hasn't registered", (int)type);
+		}
+		else if (type == SessionProtocol::MT_LOBBY_CREATE) {
+			SessionProtocol::LobbyCreate request;
+			SessionProtocol::LobbyCreateResp resp;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize lobby create request");
+				resp.result = SessionProtocol::JR_REQUEST_INVALID;
+				json respMsg = resp;
+				Respond(conn, respMsg);
+				continue;
+			}
+
+			if (!peerIter->second.lobbyKey.empty()) {
+				resp.result = SessionProtocol::JR_ALREADY_IN_LOBBY;
+				json respMsg = resp;
+				Respond(conn, respMsg);
+				continue;
+			}
+
+			std::string displayName = request.name;
+			if (displayName.empty()) {
+				displayName = peerIter->second.data.name + "'s lobby";
+			}
+
+			// 1v1 scope: created lobbies hold exactly the two players.
+			Lobby* lobby = registry.Create(
+				displayName,
+				request.editionSelect,
+				request.roundCount,
+				request.roundTime,
+				2,
+				false
+			);
+			SeatInLobby(conn, *lobby);
+			spdlog::info("Server: \"{}\" created lobby {} (\"{}\")", peerIter->second.data.name, lobby->id.key, displayName);
+
+			resp.result = SessionProtocol::JOIN_OK;
+			resp.lobby = lobby->id;
+			json respMsg = resp;
+			Respond(conn, respMsg);
+		}
+		else if (type == SessionProtocol::MT_LOBBY_LIST) {
+			SessionProtocol::LobbyListResp resp;
+			for (auto iter = registry.lobbies.begin(); iter != registry.lobbies.end(); iter++) {
+				Lobby& lobby = iter->second;
+				SessionProtocol::LobbyListEntry entry;
+				entry.id = lobby.id;
+				entry.name = lobby.displayName;
+				entry.playerCount = (int32_t)lobby.members.size();
+				entry.capacity = (int32_t)lobby.capacity;
+				for (auto memberIter = lobby.members.begin(); memberIter != lobby.members.end(); memberIter++) {
+					entry.players.push_back(memberIter->data.name);
+				}
+				resp.lobbies.push_back(entry);
+			}
+			json respMsg = resp;
+			Respond(conn, respMsg);
+		}
+		else if (type == SessionProtocol::MT_LOBBY_LEAVE) {
+			if (peerIter->second.lobbyKey.empty()) {
+				spdlog::info("Server: \"{}\" asked to leave but is not in a lobby", peerIter->second.data.name);
+				continue;
+			}
+			RemoveFromLobby(conn);
+			RespondNullLobbyUpdate(conn);
+		}
+		else if (type == SessionProtocol::MT_FORWARD) {
+			SessionProtocol::ForwardMessage fwdMsg;
+			try {
+				msg.get_to(fwdMsg);
+			}
+			catch (json::exception e) {
+				spdlog::debug("Server: could not deserialize forwarding message");
+				continue;
+			}
+
+			// If this is a connection ID managed by this server, we can apply
+			// additional security- messages with this source address should
+			// only be coming from the connection that the address is assigned
+			// to.
+			if (fwdMsg.src.host == _identity) {
+				if (fwdMsg.src.user != std::to_string(conn)) {
+					spdlog::debug("Server: dropping fraudulent packet; {} masqueraded as {}", conn, fwdMsg.src.user);
+					continue;
+				}
+			}
+
+			if (fwdMsg.dest.host != _identity) {
+				spdlog::info("Server: cannot forward to nonlocal identity {}@{}, clustering not yet implemented", fwdMsg.dest.user, fwdMsg.dest.host);
+				continue;
+			}
+
+			// Forwarding is scoped to members of the sender's lobby.
+			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
+			if (!lobby) {
+				spdlog::debug("Server: dropping forward from \"{}\": not in a lobby", peerIter->second.data.name);
+				continue;
+			}
+			LobbyMember* dest = nullptr;
+			for (auto memberIter = lobby->members.begin(); memberIter != lobby->members.end(); memberIter++) {
+				if (memberIter->data.connId == fwdMsg.dest) {
+					dest = &*memberIter;
+					break;
+				}
+			}
+			if (dest) {
+				Respond(dest->conn, msg);
+			}
+			else {
+				spdlog::debug("Server: Could not forward to {}@{}: not in sender's lobby", fwdMsg.dest.user, fwdMsg.dest.host);
+			}
+		}
+		else if (type == SessionProtocol::MT_PREBATTLE_SETCHARA) {
+			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
+			if (!lobby) {
+				spdlog::info("Server: sender {} tried to set chara, but is not in a lobby", conn);
+				continue;
+			}
+			int side = lobby->MemberIndex(conn);
+			if (side < 0 || side > 1) {
+				spdlog::info("Server: sender {} tried to set chara, but is not playing", conn);
+				continue;
+			}
+
+			SessionProtocol::PreBattleSetChara request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize SetConditionsRequest");
+				continue;
+			}
+			lobby->match.chara[side] = request.chara;
+			lobby->dirty = true;
+		}
+		else if (type == SessionProtocol::MT_PREBATTLE_SETENV) {
+			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
+			if (!lobby || lobby->MemberIndex(conn) != 0) {
+				spdlog::info("Server: sender {} tried to set env, but is not P1", conn);
+				continue;
+			}
+			SessionProtocol::PreBattleSetEnv request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize SetConditionsRequest");
+				continue;
+			}
+
+			lobby->match.rngSeed = request.rngSeed;
+			lobby->dirty = true;
+		}
+		else if (type == SessionProtocol::MT_PREBATTLE_SETSTAGE) {
+			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
+			if (!lobby || lobby->MemberIndex(conn) != 0) {
+				spdlog::info("Server: sender {} tried to set stage, but is not P1", conn);
+				continue;
+			}
+			SessionProtocol::PreBattleSetStage request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize SetConditionsRequest");
+				continue;
+			}
+
+			lobby->match.stageID = request.stageID;
+			lobby->dirty = true;
+		}
+		else if (type == SessionProtocol::MT_BATTLE_LOADED) {
+			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
+			if (!lobby) {
+				spdlog::info("Server: sender {} sent battle loaded, but is not in a lobby", conn);
+				continue;
+			}
+			LobbyMember* member = lobby->FindMember(conn);
+			member->data.flags |= SessionProtocol::MF_BATTLE_LOADED;
+
+			bool allLoaded = true;
+			for (auto memberIter = lobby->members.begin(); memberIter != lobby->members.end(); memberIter++) {
+				allLoaded = allLoaded && (memberIter->data.flags & SessionProtocol::MF_BATTLE_LOADED);
+			}
+			lobby->sendBattleSynced = allLoaded;
+			lobby->dirty = true;
+		}
+		else if (type == SessionProtocol::MT_LOBBY_READY) {
+			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
+			if (!lobby) {
+				spdlog::info("Server: sender {} tried to ready, but is not in a lobby", conn);
+				continue;
+			}
+			int side = lobby->MemberIndex(conn);
+			if (side < 0 || side > 1) {
+				spdlog::info("Server: sender {} tried to ready, but is not playing", conn);
+				continue;
+			}
+
+			SessionProtocol::LobbyReady request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize ReportResultsRequest");
+				continue;
+			}
+			lobby->match.readyMessageNum[side] = pIncomingMsg->GetMessageNumber();
+			lobby->sendAllReady = lobby->sendAllReady || lobby->match.IsAllReady();
+			lobby->dirty = true;
+		}
+		else if (type == SessionProtocol::MT_LOBBY_REPORTRESULTS) {
+			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
+			if (!lobby) {
+				spdlog::info("Server: sender {} reported results, but is not in a lobby", conn);
+				continue;
+			}
+			SessionProtocol::LobbyReportResults request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize ReportResultsRequest");
+				continue;
+			}
+
+			HandleResults(*lobby, request.loserSide);
+			lobby->dirty = true;
+		}
+		else if (type == SessionProtocol::MT_BATTLE_SNAPSHOT) {
+			// Forward the snapshot to every other member of the sender's
+			// lobby.
+			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
+			if (!lobby) {
+				continue;
+			}
+			for (auto memberIter = lobby->members.begin(); memberIter != lobby->members.end(); memberIter++) {
+				if (memberIter->conn != conn) {
+					_interface->SendMessageToConnection(
+						memberIter->conn, (const char*)pIncomingMsg->m_pData, pIncomingMsg->m_cbSize,
+						k_nSteamNetworkingSend_Reliable, nullptr
+					);
+				}
 			}
 		}
 		else {
-			SessionProtocol::ConnectionID cid = cidMap[conn];
-			if (type == SessionProtocol::MT_FORWARD) {
-				SessionProtocol::ForwardMessage fwdMsg;
-				try {
-					msg.get_to(fwdMsg);
-				}
-				catch (json::exception e) {
-					spdlog::debug("Server: could not deserialize forwarding message");
-					continue;
-				}
-
-				// If this is a connection ID managed by this server, we can apply
-				// additional security- messages with this source address should
-				// only be coming from the connection that the address is assigned
-				// to.
-				if (fwdMsg.src.host == _identity) {
-					if (fwdMsg.src.user != std::to_string(conn)) {
-						spdlog::debug("Server: dropping fraudulent packet; {} masqueraded as {}", conn, fwdMsg.src.user);
-					}
-				}
-
-				if (fwdMsg.dest.host != _identity) {
-					spdlog::info("Server: cannot forward to nonlocal identity {}@{}, clustering not yet implemented", fwdMsg.dest.user, fwdMsg.dest.host);
-				}
-
-				// Check that the destination is in fact the lobby
-				auto clientIter = clients.begin();
-				for (; clientIter != clients.end(); clientIter++) {
-					if (clientIter->data.connId == fwdMsg.dest) {
-						break;
-					}
-				}
-				if (clientIter != clients.end()) {
-					Respond(conn, msg);
-				}
-				else {
-					spdlog::debug("Server: Could not forward to {}@{}: not in known lobby", fwdMsg.dest.user, fwdMsg.dest.host);
-				}
-			}
-			else if (type == SessionProtocol::MT_SESSION_JOINREQ) {
-				SessionProtocol::SessionJoinRequest request;
-				try {
-					msg.get_to(request);
-				}
-				catch (json::exception e) {
-					spdlog::info("Server: could not deserialize join request");
-					SessionProtocol::SessionJoinReject reject;
-					reject.result = SessionProtocol::JR_REQUEST_INVALID;
-					json rejectMsg = reject;
-					Respond(conn, rejectMsg);
-					continue;
-				}
-
-				SteamNetworkingIPAddr peerAddr = *(pIncomingMsg->m_identityPeer.GetIPAddr());
-				SessionProtocol::JoinResult joinResult = RegisterToWait(conn, request.port, request.sidecarHash, request.username, peerAddr, cid);
-				if (joinResult != SessionProtocol::JOIN_OK) {
-					spdlog::info("Server: rejecting registration for reason {}", (int)joinResult);
-					SessionProtocol::SessionJoinReject reject;
-					reject.result = joinResult;
-					json rejectMsg = reject;
-					Respond(conn, rejectMsg);
-					continue;
-				}
-
-				_dataDirty = true;
-			}
-			else if (type == SessionProtocol::MT_PREBATTLE_SETCHARA) {
-				int side = -1;
-				for (int i = 0; i < 2; i++) {
-					if (clients.size() > i && clients.at(i).conn == conn) {
-						side = i;
-						break;
-					}
-				}
-				if (side == -1) {
-					spdlog::info("Server: sender {} tried to set chara, but is not playing", conn);
-					continue;
-				}
-
-				SessionProtocol::PreBattleSetChara request;
-				try {
-					msg.get_to(request);
-				}
-				catch (json::exception e) {
-					spdlog::info("Server: could not deserialize SetConditionsRequest");
-					continue;
-				}
-				_matchData.chara[side] = request.chara;
-				_dataDirty = true;
-			}
-			else if (type == SessionProtocol::MT_PREBATTLE_SETENV) {
-				int side = -1;
-				for (int i = 0; i < 2; i++) {
-					if (clients.size() > i && clients.at(i).conn == conn) {
-						side = i;
-						break;
-					}
-				}
-				if (side != 0) {
-					spdlog::info("Server: sender {} tried to set env, but is not P1", conn);
-					continue;
-				}
-				SessionProtocol::PreBattleSetEnv request;
-				try {
-					msg.get_to(request);
-				}
-				catch (json::exception e) {
-					spdlog::info("Server: could not deserialize SetConditionsRequest");
-					continue;
-				}
-
-				_matchData.rngSeed = request.rngSeed;
-				_dataDirty = true;
-			}
-			else if (type == SessionProtocol::MT_PREBATTLE_SETSTAGE) {
-				int side = -1;
-				for (int i = 0; i < 2; i++) {
-					if (clients.size() > i && clients.at(i).conn == conn) {
-						side = i;
-						break;
-					}
-				}
-				if (side != 0) {
-					spdlog::info("Server: sender {} tried to set stage, but is not P1", conn);
-					continue;
-				}
-				SessionProtocol::PreBattleSetStage request;
-				try {
-					msg.get_to(request);
-				}
-				catch (json::exception e) {
-					spdlog::info("Server: could not deserialize SetConditionsRequest");
-					continue;
-				}
-
-				_matchData.stageID = request.stageID;
-				_dataDirty = true;
-			}
-			else if (type == SessionProtocol::MT_BATTLE_LOADED) {
-				bSendBattleSynced = true;
-				for (int i = 0; i < clients.size(); i++) {
-					if (clients.at(i).conn == conn) {
-						clients.at(i).data.flags |= SessionProtocol::MF_BATTLE_LOADED;
-					}
-					bSendBattleSynced = bSendBattleSynced && (clients.at(i).data.flags & SessionProtocol::MF_BATTLE_LOADED);
-				}
-				_dataDirty = true;
-			}
-			else if (type == SessionProtocol::MT_LOBBY_READY) {
-				int side = -1;
-				for (int i = 0; i < 2; i++) {
-					if (clients.size() > i && clients.at(i).conn == conn) {
-						side = i;
-						break;
-					}
-				}
-				if (side == -1) {
-					spdlog::info("Server: sender {} tried to ready, but is not playing", conn);
-					continue;
-				}
-
-				SessionProtocol::LobbyReady request;
-				try {
-					msg.get_to(request);
-				}
-				catch (json::exception e) {
-					spdlog::info("Server: could not deserialize ReportResultsRequest");
-					continue;
-				}
-				_matchData.readyMessageNum[side] = pIncomingMsg->GetMessageNumber();
-				bSendLobbyAllReady = bSendLobbyAllReady || _matchData.IsAllReady();
-				_dataDirty = true;
-			}
-			else if (type == SessionProtocol::MT_LOBBY_REPORTRESULTS) {
-				SessionProtocol::LobbyReportResults request;
-				try {
-					msg.get_to(request);
-				}
-				catch (json::exception e) {
-					spdlog::info("Server: could not deserialize ReportResultsRequest");
-					continue;
-				}
-
-				HandleResults(request.loserSide);
-				_dataDirty = true;
-			}
-			else if (type == SessionProtocol::MT_BATTLE_SNAPSHOT) {
-				// Forward the snapshot to every other client.
-				for (auto clientIter = clients.begin(); clientIter != clients.end(); clientIter++) {
-					if (clientIter->conn != conn) {
-						_interface->SendMessageToConnection(
-							clientIter->conn, (const char*)pIncomingMsg->m_pData, pIncomingMsg->m_cbSize,
-							k_nSteamNetworkingSend_Reliable, nullptr
-						);
-					}
-				}
-			}
-			else {
-				spdlog::warn("Server: got unrecognized message type: {}", (int)type);
-			}
+			spdlog::warn("Server: got unrecognized message type: {}", (int)type);
 		}
 	}
 
@@ -353,24 +523,28 @@ int SessionServer::Step()
 		}
 	}
 
-	if (_dataDirty) {
-		SessionProtocol::SessionDataUpdate updateMsg;
-		updateMsg.lobbyData = _lobbyData;
-		updateMsg.matchData = _matchData;
-		updateMsg.lobbyData.members.clear();
-		for (auto clientIter = clients.begin(); clientIter != clients.end(); clientIter++) {
-			updateMsg.lobbyData.members.push_back(clientIter->data);
+	for (auto iter = registry.lobbies.begin(); iter != registry.lobbies.end(); iter++) {
+		Lobby& lobby = iter->second;
+		if (lobby.dirty) {
+			SessionProtocol::SessionDataUpdate updateMsg;
+			updateMsg.lobbyData = lobby.ToLobbyData();
+			updateMsg.matchData = lobby.match;
+			json update = updateMsg;
+			BroadcastToLobby(lobby, update);
+			lobby.dirty = false;
 		}
-		BroadcastMessage(json(updateMsg));
-		_dataDirty = false;
-	}
 
-	if (bSendLobbyAllReady) {
-		BroadcastMessage(json(SessionProtocol::LobbyAllReady()));
-	}
+		if (lobby.sendAllReady) {
+			json allReady = SessionProtocol::LobbyAllReady();
+			BroadcastToLobby(lobby, allReady);
+			lobby.sendAllReady = false;
+		}
 
-	if (bSendBattleSynced) {
-		BroadcastMessage(json(SessionProtocol::BattleSynced()));
+		if (lobby.sendBattleSynced) {
+			json synced = SessionProtocol::BattleSynced();
+			BroadcastToLobby(lobby, synced);
+			lobby.sendBattleSynced = false;
+		}
 	}
 
 	return 0;
@@ -384,16 +558,71 @@ void SessionServer::Respond(HSteamNetConnection client, nlohmann::json& msg) {
 	);
 }
 
-void SessionServer::BroadcastMessage(nlohmann::json& msg) {
+void SessionServer::RespondNullLobbyUpdate(HSteamNetConnection client) {
+	SessionProtocol::SessionDataUpdate ack;
+	ack.lobbyData = SessionProtocol::LobbyData::NULL_LOBBY;
+	json msg = ack;
+	Respond(client, msg);
+}
+
+void SessionServer::RespondJoinReject(HSteamNetConnection client, SessionProtocol::JoinResult result) {
+	SessionProtocol::SessionJoinReject reject;
+	reject.result = result;
+	json msg = reject;
+	Respond(client, msg);
+}
+
+void SessionServer::BroadcastToLobby(Lobby& lobby, nlohmann::json& msg) {
 	// XXX (adanducci) replace SendMessageToConnection with SendMessages for
 	// peformance gains, but ensuring low-copy with it is annoyingly difficult.
 	std::string buf = msg.dump();
-	for (auto clientIter = clients.begin(); clientIter != clients.end(); clientIter++) {
+	for (auto iter = lobby.members.begin(); iter != lobby.members.end(); iter++) {
 		_interface->SendMessageToConnection(
-			clientIter->conn, buf.c_str(), (uint32)buf.length(),
+			iter->conn, buf.c_str(), (uint32)buf.length(),
 			k_nSteamNetworkingSend_Reliable, nullptr
 		);
 	}
+}
+
+void SessionServer::SeatInLobby(HSteamNetConnection conn, Lobby& lobby) {
+	Peer& peer = peers[conn];
+	LobbyMember member;
+	member.data = peer.data;
+	member.conn = conn;
+	lobby.members.push_back(member);
+	peer.lobbyKey = lobby.id.key;
+	lobby.dirty = true;
+}
+
+void SessionServer::RemoveFromLobby(HSteamNetConnection conn) {
+	auto peerIter = peers.find(conn);
+	if (peerIter == peers.end() || peerIter->second.lobbyKey.empty()) {
+		return;
+	}
+
+	std::string key = peerIter->second.lobbyKey;
+	peerIter->second.lobbyKey = "";
+
+	Lobby* lobby = registry.FindByKey(key);
+	if (!lobby) {
+		return;
+	}
+
+	for (auto memberIter = lobby->members.begin(); memberIter != lobby->members.end(); memberIter++) {
+		if (memberIter->conn == conn) {
+			lobby->members.erase(memberIter);
+			break;
+		}
+	}
+
+	if (lobby->members.empty() && !lobby->persistent) {
+		registry.Remove(key);
+		return;
+	}
+
+	// A member leaving invalidates any half-agreed match setup.
+	lobby->match.Clear();
+	lobby->dirty = true;
 }
 
 int SessionServer::Close()
@@ -401,11 +630,13 @@ int SessionServer::Close()
 	spdlog::info("Closing connections...");
 	// Close all connections.  We use "linger mode" to ask SteamNetworkingSockets
 	// to flush this out and close gracefully.
-	for (auto iter = clients.begin(); iter != clients.end(); iter++) {
-		_interface->SetConnectionPollGroup(iter->conn, k_HSteamNetPollGroup_Invalid);
-		_interface->CloseConnection(iter->conn, 0, "Server Shutdown", true);
+	for (auto iter = cidMap.begin(); iter != cidMap.end(); iter++) {
+		_interface->SetConnectionPollGroup(iter->first, k_HSteamNetPollGroup_Invalid);
+		_interface->CloseConnection(iter->first, 0, "Server Shutdown", true);
 	}
-	clients.clear();
+	cidMap.clear();
+	peers.clear();
+	registry.lobbies.clear();
 	_interface->DestroyPollGroup(_pollGroup);
 	_pollGroup = k_HSteamNetPollGroup_Invalid;
 	if (_listenSock != k_HSteamListenSocket_Invalid) {
@@ -422,8 +653,11 @@ void SessionServer::PrepareForCallbacks()
 
 void SessionServer::ResetBattleSync()
 {
-	for (int i = 0; i < clients.size(); i++) {
-		clients.at(i).data.flags &= (~SessionProtocol::MF_BATTLE_LOADED);
+	for (auto iter = registry.lobbies.begin(); iter != registry.lobbies.end(); iter++) {
+		Lobby& lobby = iter->second;
+		for (auto memberIter = lobby.members.begin(); memberIter != lobby.members.end(); memberIter++) {
+			memberIter->data.flags &= (~SessionProtocol::MF_BATTLE_LOADED);
+		}
 	}
 }
 
@@ -457,13 +691,9 @@ void SessionServer::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusCh
 				pInfo->m_info.m_szEndDebug
 			);
 
-			for (auto iter = clients.begin(); iter != clients.end(); iter++) {
-				if (iter->conn == pInfo->m_hConn) {
-					clients.erase(iter);
-					_dataDirty = true;
-					break;
-				}
-			}
+			RemoveFromLobby(pInfo->m_hConn);
+			peers.erase(pInfo->m_hConn);
+			cidMap.erase(pInfo->m_hConn);
 
 			// Clean up the connection.  This is important!
 			// The connection is "closed" in the network sense, but
@@ -504,46 +734,13 @@ void SessionServer::SteamNetConnectionStatusChangedCallback(SteamNetConnectionSt
 	s_pCallbackInstance->OnSteamNetConnectionStatusChanged(pInfo);
 }
 
-SessionProtocol::JoinResult SessionServer::RegisterToWait(
-	const HSteamNetConnection& conn,
-	const uint16_t& port,
-	const std::string& sidecarHash,
-	const std::string& name,
-	const SteamNetworkingIPAddr& peerAddr,
-	SessionProtocol::ConnectionID& cid
-) {
-	// An empty expected hash means "accept any build". Dedicated dev
-	// servers use this before a release hash is pinned, and connections
-	// that don't run the game (ex. lobby browsers) have no sidecar at all.
-	if (!_sidecarHash.empty() && sidecarHash != _sidecarHash) {
-		return SessionProtocol::JR_HASH_INVALID;
+void SessionServer::HandleResults(Lobby& lobby, int loserIndex) {
+	if (loserIndex < 0 || loserIndex >= (int)lobby.members.size()) {
+		spdlog::info("Server: ignoring results report with out-of-range loser {}", loserIndex);
+		return;
 	}
-
-	if (clients.size() >= MAX_SF4E_PROTOCOL_USERS) {
-		return SessionProtocol::JR_LOBBY_FULL;
-	}
-
-	for (auto iter = clients.begin(); iter != clients.end(); iter++) {
-		if (iter->data.name == name) {
-			return SessionProtocol::JR_NAME_TAKEN;
-		}
-	}
-
-	char peerAddrStr[SteamNetworkingIPAddr::k_cchMaxString];
-	if (peerAddr.IsLocalHost()) {
-		peerAddrStr[0] = 0;
-	}
-	else {
-		peerAddr.ToString(peerAddrStr, SteamNetworkingIPAddr::k_cchMaxString, false);
-	}
-	SessionMember newMember{ {cid, name, peerAddrStr, port}, conn };
-	clients.push_back(std::move(newMember));
-	return SessionProtocol::JOIN_OK;
-}
-
-void SessionServer::HandleResults(int loserIndex) {
-	auto loser = clients.begin() + loserIndex;
-	clients.push_back(*loser);
-	clients.erase(loser);
-	_matchData.Clear();
+	auto loser = lobby.members.begin() + loserIndex;
+	lobby.members.push_back(*loser);
+	lobby.members.erase(loser);
+	lobby.match.Clear();
 }

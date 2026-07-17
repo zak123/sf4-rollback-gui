@@ -103,6 +103,8 @@ target_link_libraries(
 )
 
 add_library(Session STATIC
+    "src/session/sf4e__LobbyRegistry.hxx"
+    "src/session/sf4e__LobbyRegistry.cxx"
     "src/session/sf4e__SessionClient.hxx"
     "src/session/sf4e__SessionClient.cxx"
     "src/session/sf4e__SessionProtocol.hxx"
@@ -118,6 +120,9 @@ target_link_libraries(
 
 add_executable(Lobbyd "src/lobbyd/lobbyd.cxx")
 target_link_libraries(Lobbyd PRIVATE Session CLI11::CLI11)
+
+add_executable(SessionSmokeTest "src/session/smoke_test.cxx")
+target_link_libraries(SessionSmokeTest PRIVATE nlohmann_json::nlohmann_json imgui::imgui spdlog::spdlog Dimps sf4e Session "d3d9")
 
 add_executable(SessionInteractiveTest "src/session/interactive_test.cxx")
 target_link_libraries(SessionInteractiveTest PRIVATE nlohmann_json::nlohmann_json imgui::imgui spdlog::spdlog Dimps sf4e Session "d3d9")

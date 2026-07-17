@@ -1,4 +1,5 @@
 #include <atomic>
+#include <memory>
 #include <string>
 
 #include <windows.h>
@@ -65,11 +66,19 @@ int main(int argc, char** argv) {
 		"Only admit clients whose Sidecar.dll hash matches. Empty (default) "
 		"accepts any build- fine for development, not for public servers."
 	);
-	app.add_option("--rounds", nRoundCount, "Rounds per match")
+	app.add_option("--rounds", nRoundCount, "Default lobby: rounds per match")
 		->check(CLI::IsMember({ 1, 3, 5, 7 }));
-	app.add_option("--round-time", nRoundTimeSecs, "Round timer in seconds")
+	app.add_option("--round-time", nRoundTimeSecs, "Default lobby: round timer in seconds")
 		->check(CLI::IsMember({ 30, 60, 99 }));
-	app.add_flag("--no-edition-select", bNoEditionSelect, "Disable edition select");
+	app.add_flag("--no-edition-select", bNoEditionSelect, "Default lobby: disable edition select");
+	bool bNoDefaultLobby = false;
+	app.add_flag(
+		"--no-default-lobby",
+		bNoDefaultLobby,
+		"Don't host the compatibility default lobby. Clients joining without "
+		"naming a lobby idle in the lounge instead of being seated, so every "
+		"lobby must be created explicitly."
+	);
 	app.add_flag("--verbose", bVerbose, "Enable debug logging");
 	CLI11_PARSE(app, argc, argv);
 
@@ -91,13 +100,20 @@ int main(int argc, char** argv) {
 
 	int ret = 0;
 	{
-		sf4e::SessionServer server(
-			identity,
-			sidecarHash,
-			!bNoEditionSelect,
-			nRoundCount,
-			FixedPoint{ 0, (short)nRoundTimeSecs }
-		);
+		std::unique_ptr<sf4e::SessionServer> pServer;
+		if (bNoDefaultLobby) {
+			pServer.reset(new sf4e::SessionServer(identity, sidecarHash));
+		}
+		else {
+			pServer.reset(new sf4e::SessionServer(
+				identity,
+				sidecarHash,
+				!bNoEditionSelect,
+				nRoundCount,
+				FixedPoint{ 0, (short)nRoundTimeSecs }
+			));
+		}
+		sf4e::SessionServer& server = *pServer;
 		if (server.Listen(nPort) != 0) {
 			spdlog::error("Lobbyd could not listen on port {}", nPort);
 			ret = 1;

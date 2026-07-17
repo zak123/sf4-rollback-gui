@@ -18,6 +18,7 @@ namespace sf4e {
 		const LobbyID LobbyID::NULL_LOBBY_ID = { "", "" };
 		const LobbyData LobbyData::NULL_LOBBY = {
 			LobbyID::NULL_LOBBY_ID,
+			"",
 			false,
 			0,
 			{0, 0},

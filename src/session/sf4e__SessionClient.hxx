@@ -24,13 +24,20 @@ namespace sf4e {
 			SCE_JOIN_REJECTED_LOBBY_FULL,
 			SCE_JOIN_REJECTED_NAME_TAKEN,
 			SCE_JOIN_REJECTED_REQUEST_INVALID,
+			SCE_JOIN_REJECTED_NOT_REGISTERED,
+			SCE_JOIN_REJECTED_ALREADY_IN_LOBBY,
+			SCE_JOIN_REJECTED_NO_SUCH_LOBBY,
 		};
 
+		// Callback members past OnBattleSynced may be left null by users
+		// that don't care about them; the client checks before calling.
 		struct Callbacks {
 			void* data;
 			void (*OnError)(ErrorType errorType, SessionClient* const client, const Callbacks& callbacks);
 			void (*OnReady)(SessionClient* const client, const Callbacks& callbacks);
 			void (*OnBattleSynced)(SessionClient* const client, const Callbacks& callbacks);
+			void (*OnLobbyCreated)(SessionProtocol::JoinResult result, SessionClient* const client, const Callbacks& callbacks);
+			void (*OnLobbyList)(SessionClient* const client, const Callbacks& callbacks);
 		};
 
 		SessionClient(
@@ -51,9 +58,19 @@ namespace sf4e {
 		std::string _name;
 		SessionProtocol::LobbyData _lobbyData;
 		SessionProtocol::MatchData _matchData;
+		std::vector<SessionProtocol::LobbyListEntry> _lobbyListing;
 		int64_t _outstandingReadyRequestNumber = -1;
 		bool _snapshotsEnabled;
 
+		EResult Lobby_Create(
+			const std::string& name,
+			bool editionSelect,
+			int32_t roundCount,
+			Dimps::Math::FixedPoint roundTime
+		);
+		EResult Lobby_RequestList();
+		EResult Lobby_Join(const SessionProtocol::LobbyID& id);
+		EResult Lobby_Leave();
 		EResult Lobby_Ready();
 		EResult Lobby_ReportResults(int loserSide);
 
