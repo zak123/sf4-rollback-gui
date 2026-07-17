@@ -1,3 +1,4 @@
+#include <random>
 #include <string>
 #include <time.h>
 #include <utility>
@@ -32,6 +33,23 @@ const int sf4e::SESSION_SERVER_MAX_MESSAGES_PER_POLL = 200;
 // Peer::chatStamps.
 static const int CHAT_RATE_BURST = 5;
 static const uint64_t CHAT_RATE_WINDOW_MS = 2000;
+
+// How long a seat-handoff token stays valid. Generously covers the
+// launch-plus-boot time of the game process it's issued for.
+static const uint64_t HANDOFF_TTL_MS = 60 * 1000;
+
+static std::string GenerateHandoffToken() {
+	static std::mt19937_64 gen(std::random_device{}());
+	char buf[33];
+	snprintf(
+		buf,
+		sizeof(buf),
+		"%016llx%016llx",
+		(unsigned long long)gen(),
+		(unsigned long long)gen()
+	);
+	return std::string(buf);
+}
 
 SessionServer* SessionServer::s_pCallbackInstance;
 
@@ -187,6 +205,88 @@ int SessionServer::Step()
 				peerIter != peers.end(),
 				request.lobby.key
 			);
+
+			if (!request.handoff.empty()) {
+				// Seat takeover: a game process presenting a one-shot
+				// token takes over the seat held by the lobby app that
+				// launched it. Tokens are consumed on first sight,
+				// matched or not expired or not.
+				if (!_sidecarHash.empty() && request.sidecarHash != _sidecarHash) {
+					spdlog::info("Server: rejecting handoff for bad sidecar hash");
+					RespondJoinReject(conn, SessionProtocol::JR_HASH_INVALID);
+					continue;
+				}
+
+				Lobby* lobby = registry.FindByKey(request.lobby.key);
+				int seat = -1;
+				if (lobby) {
+					uint64_t now = GetTickCount64();
+					for (auto hIter = lobby->pendingHandoffs.begin(); hIter != lobby->pendingHandoffs.end(); hIter++) {
+						if (hIter->token == request.handoff) {
+							if (now - hIter->issuedAtMs <= HANDOFF_TTL_MS) {
+								seat = hIter->seat;
+							}
+							lobby->pendingHandoffs.erase(hIter);
+							break;
+						}
+					}
+				}
+				if (!lobby || seat < 0 || seat >= (int)lobby->members.size()) {
+					spdlog::info("Server: rejecting invalid/expired handoff from conn {}", conn);
+					RespondJoinReject(conn, SessionProtocol::JR_HANDOFF_INVALID);
+					continue;
+				}
+
+				LobbyMember& member = lobby->members[seat];
+				HSteamNetConnection oldConn = member.conn;
+
+				char peerAddrStr[SteamNetworkingIPAddr::k_cchMaxString];
+				SteamNetworkingIPAddr peerAddr = *(pIncomingMsg->m_identityPeer.GetIPAddr());
+				if (peerAddr.IsLocalHost()) {
+					peerAddrStr[0] = 0;
+				}
+				else {
+					peerAddr.ToString(peerAddrStr, SteamNetworkingIPAddr::k_cchMaxString, false);
+				}
+
+				// The game connection registers under the seat's name.
+				// Two peers deliberately share the name for the duration
+				// of the match: the app keeps its registration for lounge
+				// chat.
+				Peer gamePeer;
+				gamePeer.data = { cid, member.data.name, peerAddrStr, request.port, 0 };
+				gamePeer.lobbyKey = lobby->id.key;
+				peers[conn] = gamePeer;
+				peerIter = peers.find(conn);
+
+				// Swap the seat over with the game's own routing info-
+				// GGPO needs the game process's address and port, not
+				// the app's.
+				member.conn = conn;
+				member.data.connId = cid;
+				member.data.ip = peerAddrStr;
+				member.data.port = request.port;
+				member.data.flags = 0;
+
+				auto oldPeerIter = peers.find(oldConn);
+				if (oldPeerIter != peers.end() && oldConn != conn) {
+					oldPeerIter->second.lobbyKey = "";
+					RespondNullLobbyUpdate(oldConn);
+				}
+
+				lobby->dirty = true;
+				if (lobby->match.IsAllReady()) {
+					lobby->pendingAllReadySends.push_back(conn);
+				}
+				spdlog::info(
+					"Server: seat {} (\"{}\") of lobby {} handed off to conn {}",
+					seat,
+					member.data.name,
+					lobby->id.key,
+					conn
+				);
+				continue;
+			}
 
 			if (peerIter == peers.end()) {
 				// First join request from this connection: register it.
@@ -599,6 +699,31 @@ int SessionServer::Step()
 			json allReady = SessionProtocol::LobbyAllReady();
 			BroadcastToLobby(lobby, allReady);
 			lobby.sendAllReady = false;
+
+			// Issue each seat a one-shot handoff token so the apps can
+			// hand their seats to the game processes they launch.
+			lobby.ClearHandoffs();
+			for (int seat = 0; seat < 2 && seat < (int)lobby.members.size(); seat++) {
+				Lobby::PendingHandoff pending;
+				pending.token = GenerateHandoffToken();
+				pending.seat = seat;
+				pending.issuedAtMs = GetTickCount64();
+				lobby.pendingHandoffs.push_back(pending);
+
+				SessionProtocol::MatchHandoff handoffMsg;
+				handoffMsg.token = pending.token;
+				handoffMsg.lobby = lobby.id;
+				json m = handoffMsg;
+				Respond(lobby.members[seat].conn, m);
+			}
+		}
+
+		if (!lobby.pendingAllReadySends.empty()) {
+			for (auto connIter = lobby.pendingAllReadySends.begin(); connIter != lobby.pendingAllReadySends.end(); connIter++) {
+				json allReady = SessionProtocol::LobbyAllReady();
+				Respond(*connIter, allReady);
+			}
+			lobby.pendingAllReadySends.clear();
 		}
 
 		if (lobby.sendBattleSynced) {
@@ -691,8 +816,10 @@ void SessionServer::RemoveFromLobby(HSteamNetConnection conn) {
 		return;
 	}
 
-	// A member leaving invalidates any half-agreed match setup.
+	// A member leaving invalidates any half-agreed match setup, along
+	// with any handoff tokens issued for it.
 	lobby->match.Clear();
+	lobby->ClearHandoffs();
 	lobby->dirty = true;
 }
 
@@ -814,4 +941,5 @@ void SessionServer::HandleResults(Lobby& lobby, int loserIndex) {
 	lobby.members.push_back(*loser);
 	lobby.members.erase(loser);
 	lobby.match.Clear();
+	lobby.ClearHandoffs();
 }

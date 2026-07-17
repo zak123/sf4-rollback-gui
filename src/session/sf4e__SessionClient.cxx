@@ -179,6 +179,8 @@ int SessionClient::Step()
 			request.sidecarHash = _sidecarHash;
 			request.username = _name;
 			request.port = _ggpoPort;
+			request.lobby = _autoJoinLobby;
+			request.handoff = _autoJoinHandoff;
 			json msg = request;
 			if (Send(msg, nullptr) != k_EResultOK) {
 				spdlog::warn("Client could send initial join request");
@@ -217,6 +219,9 @@ int SessionClient::Step()
 				break;
 			case SessionProtocol::JoinResult::JR_NO_SUCH_LOBBY:
 				errType = ErrorType::SCE_JOIN_REJECTED_NO_SUCH_LOBBY;
+				break;
+			case SessionProtocol::JoinResult::JR_HANDOFF_INVALID:
+				errType = ErrorType::SCE_JOIN_REJECTED_HANDOFF_INVALID;
 				break;
 			default:
 				break;
@@ -292,6 +297,20 @@ int SessionClient::Step()
 			_lobbyListing = resp.lobbies;
 			if (_callbacks.OnLobbyList) {
 				_callbacks.OnLobbyList(this, _callbacks);
+			}
+		}
+		else if (type == SessionProtocol::MT_MATCH_HANDOFF) {
+			SessionProtocol::MatchHandoff handoff;
+			try {
+				msg.get_to(handoff);
+			}
+			catch (json::exception e) {
+				spdlog::info("Client: could not deserialize match handoff");
+				continue;
+			}
+
+			if (_callbacks.OnMatchHandoff) {
+				_callbacks.OnMatchHandoff(handoff, this, _callbacks);
 			}
 		}
 		else if (type == SessionProtocol::MT_CHAT_EVENT) {

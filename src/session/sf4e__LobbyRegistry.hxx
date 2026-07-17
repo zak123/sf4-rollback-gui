@@ -32,6 +32,22 @@ namespace sf4e {
 		SessionProtocol::MatchData match;
 		std::vector<LobbyMember> members;
 
+		// A one-shot token authorizing a new connection (the game
+		// process an app launched) to take over a seat. Issued when the
+		// match goes all-ready, consumed on first use, and lazily
+		// expired.
+		struct PendingHandoff {
+			std::string token;
+			int seat = -1;
+			uint64_t issuedAtMs = 0;
+		};
+		std::vector<PendingHandoff> pendingHandoffs;
+
+		// Connections owed a targeted all-ready notification after the
+		// next data update flush, ex. a seat freshly taken over by a
+		// game process that needs to start its match flow.
+		std::vector<HSteamNetConnection> pendingAllReadySends;
+
 		// Deferred-delivery flags, consumed by the server at the end of
 		// each step.
 		bool dirty = false;
@@ -42,6 +58,7 @@ namespace sf4e {
 		LobbyMember* FindMember(HSteamNetConnection conn);
 		int MemberIndex(HSteamNetConnection conn) const;
 		bool IsFull() const;
+		void ClearHandoffs();
 	};
 
 	// Owns every lobby hosted by a server, keyed by the `key` half of the

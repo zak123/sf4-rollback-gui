@@ -117,6 +117,8 @@ namespace sf4e {
 
 			MT_CHAT_SEND,
 			MT_CHAT_EVENT,
+
+			MT_MATCH_HANDOFF,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(MessageType, {
@@ -148,6 +150,8 @@ namespace sf4e {
 
 			{MT_CHAT_SEND, "chat_send"},
 			{MT_CHAT_EVENT, "chat_event"},
+
+			{MT_MATCH_HANDOFF, "match_handoff"},
 		})
 
 		enum JoinResult {
@@ -159,6 +163,7 @@ namespace sf4e {
 			JR_NOT_REGISTERED = 5,
 			JR_ALREADY_IN_LOBBY = 6,
 			JR_NO_SUCH_LOBBY = 7,
+			JR_HANDOFF_INVALID = 8,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(JoinResult, {
@@ -169,7 +174,8 @@ namespace sf4e {
 			{JR_HASH_INVALID, "hash_invalid"},
 			{JR_NOT_REGISTERED, "not_registered"},
 			{JR_ALREADY_IN_LOBBY, "already_in_lobby"},
-			{JR_NO_SUCH_LOBBY, "no_such_lobby"}
+			{JR_NO_SUCH_LOBBY, "no_such_lobby"},
+			{JR_HANDOFF_INVALID, "handoff_invalid"}
 		})
 
 		struct SessionHelloMsg {
@@ -269,6 +275,16 @@ namespace sf4e {
 			std::string from;
 			std::string text;
 			int64_t ts = 0;
+		};
+
+		// Sent to each seated connection when its lobby goes all-ready.
+		// The receiver (a lobby app) passes the token to the game process
+		// it launches; the game presents the token in a join request to
+		// take over the seat.
+		struct MatchHandoff {
+			MessageType type = MT_MATCH_HANDOFF;
+			std::string token;
+			LobbyID lobby = { "", "" };
 		};
 
 		struct LobbyReady {
@@ -387,6 +403,7 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyLeave, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChatSend, type, channel, text);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChatEvent, type, channel, from, text, ts);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchHandoff, type, token, lobby);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyReady, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyAllReady, type);

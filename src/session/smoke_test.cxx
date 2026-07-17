@@ -32,6 +32,8 @@ struct TestClientCtx {
 	SessionClient::ErrorType lastError = SessionClient::SCE_UNKNOWN;
 	int createResult = -1;
 	int listCount = -1;
+	bool readyFired = false;
+	SessionProtocol::MatchHandoff handoff;
 	std::vector<SessionProtocol::LobbyListEntry> lastListing;
 	std::vector<SessionProtocol::ChatEvent> chatLog;
 	std::unique_ptr<SessionClient> c;
@@ -46,6 +48,7 @@ static void OnError(SessionClient::ErrorType errType, SessionClient* const c, co
 
 static void OnReady(SessionClient* const c, const SessionClient::Callbacks& callbacks) {
 	TestClientCtx* ctx = (TestClientCtx*)callbacks.data;
+	ctx->readyFired = true;
 	spdlog::info("[{}] ready callback", ctx->name);
 }
 
@@ -73,7 +76,18 @@ static void OnChat(const SessionProtocol::ChatEvent& event, SessionClient* const
 	spdlog::info("[{}] chat [{}] {}: {}", ctx->name, event.channel, event.from, event.text);
 }
 
-static TestClientCtx* MakeClient(const std::string& name) {
+static void OnMatchHandoff(const SessionProtocol::MatchHandoff& handoff, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	TestClientCtx* ctx = (TestClientCtx*)callbacks.data;
+	ctx->handoff = handoff;
+	spdlog::info("[{}] match handoff for lobby {}", ctx->name, handoff.lobby.key);
+}
+
+static TestClientCtx* MakeClient(
+	const std::string& name,
+	uint16_t ggpoPort,
+	const SessionProtocol::LobbyID& autoJoinLobby = SessionProtocol::LobbyID{ "", "" },
+	const std::string& autoJoinHandoff = std::string()
+) {
 	TestClientCtx* ctx = new TestClientCtx();
 	ctx->name = name;
 
@@ -85,9 +99,12 @@ static TestClientCtx* MakeClient(const std::string& name) {
 		OnLobbyCreated,
 		OnLobbyList,
 		OnChat,
+		OnMatchHandoff,
 	};
 	std::string mutableName = name;
-	ctx->c.reset(new SessionClient(callbacks, std::string("smokehash"), 24000, mutableName));
+	ctx->c.reset(new SessionClient(callbacks, std::string("smokehash"), ggpoPort, mutableName));
+	ctx->c->_autoJoinLobby = autoJoinLobby;
+	ctx->c->_autoJoinHandoff = autoJoinHandoff;
 
 	SteamNetworkingIPAddr addr;
 	addr.Clear();
@@ -153,9 +170,9 @@ int main(int argc, char** argv) {
 		}
 
 		ret = [&server]() -> int {
-			TestClientCtx* alice = MakeClient("alice");
+			TestClientCtx* alice = MakeClient("alice", 24001);
 			g_clients.push_back(alice);
-			TestClientCtx* bob = MakeClient("bob");
+			TestClientCtx* bob = MakeClient("bob", 24002);
 			g_clients.push_back(bob);
 
 			// Both clients auto-send a null-lobby join request after their
@@ -206,7 +223,7 @@ int main(int argc, char** argv) {
 
 			// A third client with a duplicate name must be rejected at
 			// registration.
-			TestClientCtx* fakeAlice = MakeClient("alice");
+			TestClientCtx* fakeAlice = MakeClient("alice", 24003);
 			g_clients.push_back(fakeAlice);
 			CHECK(
 				PumpUntil(server, 5000, [&]() {
@@ -217,7 +234,7 @@ int main(int argc, char** argv) {
 			);
 
 			// A third player can register, but the 1v1 lobby is full.
-			TestClientCtx* carol = MakeClient("carol");
+			TestClientCtx* carol = MakeClient("carol", 24004);
 			g_clients.push_back(carol);
 			CHECK(
 				PumpUntil(server, 5000, [&]() { return server.peers.size() == 3; }),
@@ -308,10 +325,106 @@ int main(int argc, char** argv) {
 				"bob leaves; alice sees one member, bob is back in the lounge"
 			);
 
-			alice->c->Lobby_Leave();
+			bob->c->Lobby_Join(alice->c->_lobbyData.id);
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return bob->c->_lobbyData.members.size() == 2;
+				}),
+				"bob rejoins after leaving"
+			);
+
+			// Ready flow: both sides pick and ready up, which makes the
+			// server broadcast all-ready and issue seat handoff tokens.
+			Dimps::GameEvents::VsMode::ConfirmedCharaConditions chara;
+			memset(&chara, 0, sizeof(chara));
+			chara.charaID = 5;
+			alice->c->PreBattle_SetChara(chara);
+			alice->c->PreBattle_SetEnv(1234);
+			alice->c->PreBattle_SetStage(7);
+			alice->c->Lobby_Ready();
+			chara.charaID = 9;
+			bob->c->PreBattle_SetChara(chara);
+			bob->c->Lobby_Ready();
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return alice->readyFired && bob->readyFired &&
+						!alice->handoff.token.empty() && !bob->handoff.token.empty();
+				}),
+				"all-ready fires and both seats receive handoff tokens"
+			);
+			CHECK(alice->handoff.token != bob->handoff.token, "handoff tokens are per-seat");
+			std::string lobbyKey = alice->handoff.lobby.key;
+
+			// "Game" connections take over the seats using the tokens,
+			// exactly as the launched game processes will.
+			TestClientCtx* gameAlice = MakeClient("alice", 24101, alice->handoff.lobby, alice->handoff.token);
+			g_clients.push_back(gameAlice);
+			TestClientCtx* gameBob = MakeClient("bob", 24102, bob->handoff.lobby, bob->handoff.token);
+			g_clients.push_back(gameBob);
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return gameAlice->readyFired && gameBob->readyFired &&
+						gameAlice->c->_lobbyData.members.size() == 2 &&
+						gameBob->c->_lobbyData.members.size() == 2;
+				}),
+				"game connections take the seats and receive a targeted all-ready"
+			);
+			CHECK(
+				gameAlice->c->_matchData.stageID == 7 &&
+				gameAlice->c->_matchData.rngSeed == 1234 &&
+				gameAlice->c->_matchData.chara[0].charaID == 5 &&
+				gameAlice->c->_matchData.chara[1].charaID == 9,
+				"game connections see the match setup agreed in the apps"
+			);
+			{
+				sf4e::Lobby* lobby = server.registry.FindByKey(lobbyKey);
+				CHECK(
+					lobby &&
+					lobby->members[0].data.port == 24101 &&
+					lobby->members[1].data.port == 24102,
+					"seats carry the game processes' GGPO ports after handoff"
+				);
+			}
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return alice->c->_lobbyData.members.empty() &&
+						bob->c->_lobbyData.members.empty();
+				}),
+				"apps are returned to the lounge after their seats hand off"
+			);
+
+			size_t carolChats = carol->chatLog.size();
+			alice->c->Chat_Send(SessionProtocol::CHAT_CHANNEL_LOUNGE, std::string("good luck!"));
+			CHECK(
+				PumpUntil(server, 5000, [&]() { return carol->chatLog.size() == carolChats + 1; }),
+				"apps keep lounge chat after handing off their seats"
+			);
+
+			// Tokens are single-use and must not admit strangers.
+			TestClientCtx* mallory = MakeClient("mallory", 24998, alice->handoff.lobby, alice->handoff.token);
+			g_clients.push_back(mallory);
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return mallory->errored &&
+						mallory->lastError == SessionClient::SCE_JOIN_REJECTED_HANDOFF_INVALID;
+				}),
+				"a consumed handoff token is rejected"
+			);
+			TestClientCtx* mallory2 = MakeClient("mallory2", 24997, alice->handoff.lobby, std::string("deadbeefdeadbeefdeadbeefdeadbeef"));
+			g_clients.push_back(mallory2);
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return mallory2->errored &&
+						mallory2->lastError == SessionClient::SCE_JOIN_REJECTED_HANDOFF_INVALID;
+				}),
+				"a forged handoff token is rejected"
+			);
+
+			gameBob->c->Lobby_Leave();
+			gameAlice->c->Lobby_Leave();
 			CHECK(
 				PumpUntil(server, 5000, [&]() { return server.registry.lobbies.empty(); }),
-				"empty user lobby is removed from the registry"
+				"empty user lobby is removed after the game connections leave"
 			);
 
 			return 0;

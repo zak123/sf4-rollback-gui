@@ -42,6 +42,11 @@ bool Lobby::IsFull() const {
 	return members.size() >= capacity;
 }
 
+void Lobby::ClearHandoffs() {
+	pendingHandoffs.clear();
+	pendingAllReadySends.clear();
+}
+
 LobbyRegistry::LobbyRegistry(const std::string& hostIdentity) :
 	_hostIdentity(hostIdentity),
 	_nextKey(1)

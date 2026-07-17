@@ -27,6 +27,7 @@ namespace sf4e {
 			SCE_JOIN_REJECTED_NOT_REGISTERED,
 			SCE_JOIN_REJECTED_ALREADY_IN_LOBBY,
 			SCE_JOIN_REJECTED_NO_SUCH_LOBBY,
+			SCE_JOIN_REJECTED_HANDOFF_INVALID,
 		};
 
 		// Callback members past OnBattleSynced may be left null by users
@@ -39,6 +40,7 @@ namespace sf4e {
 			void (*OnLobbyCreated)(SessionProtocol::JoinResult result, SessionClient* const client, const Callbacks& callbacks);
 			void (*OnLobbyList)(SessionClient* const client, const Callbacks& callbacks);
 			void (*OnChat)(const SessionProtocol::ChatEvent& event, SessionClient* const client, const Callbacks& callbacks);
+			void (*OnMatchHandoff)(const SessionProtocol::MatchHandoff& handoff, SessionClient* const client, const Callbacks& callbacks);
 		};
 
 		SessionClient(
@@ -62,6 +64,13 @@ namespace sf4e {
 		std::vector<SessionProtocol::LobbyListEntry> _lobbyListing;
 		int64_t _outstandingReadyRequestNumber = -1;
 		bool _snapshotsEnabled;
+
+		// Set before Connect() to make the automatic post-hello join
+		// request target a specific lobby, optionally presenting a seat
+		// handoff token. Left as defaults, the join request carries the
+		// null lobby, preserving the older register-into-default flow.
+		SessionProtocol::LobbyID _autoJoinLobby = { "", "" };
+		std::string _autoJoinHandoff;
 
 		EResult Lobby_Create(
 			const std::string& name,
