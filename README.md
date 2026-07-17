@@ -2,6 +2,15 @@
 
 A process-inspection and modification tool for the Steam release of _Ultra Street Fighter 4_.
 
+> **This repository (`sf4-rollback-gui`) is a productized fork of
+> [sf4e](https://codeberg.org/adanducci/sf4e).** It adds a Fightcade-style
+> lobby service and desktop client — chat, a lobby browser, and
+> launch-into-match — on top of upstream's rollback implementation, which
+> remains maintained by the original author. See
+> [docs/product-design.md](docs/product-design.md) for the architecture and
+> roadmap. Everything below this notice is upstream's original documentation
+> and still applies to building and running the mod itself.
+
 [TOC]
 
 ## Running
