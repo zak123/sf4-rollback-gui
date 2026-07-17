@@ -33,6 +33,7 @@ struct TestClientCtx {
 	int createResult = -1;
 	int listCount = -1;
 	bool readyFired = false;
+	bool syncedFired = false;
 	SessionProtocol::MatchHandoff handoff;
 	std::vector<SessionProtocol::LobbyListEntry> lastListing;
 	std::vector<SessionProtocol::ChatEvent> chatLog;
@@ -54,6 +55,7 @@ static void OnReady(SessionClient* const c, const SessionClient::Callbacks& call
 
 static void OnBattleSynced(SessionClient* const c, const SessionClient::Callbacks& callbacks) {
 	TestClientCtx* ctx = (TestClientCtx*)callbacks.data;
+	ctx->syncedFired = true;
 	spdlog::info("[{}] battle synced callback", ctx->name);
 }
 
@@ -418,6 +420,53 @@ int main(int argc, char** argv) {
 						mallory2->lastError == SessionClient::SCE_JOIN_REJECTED_HANDOFF_INVALID;
 				}),
 				"a forged handoff token is rejected"
+			);
+
+			// A full battle round trip: both games load, the server
+			// releases the sync barrier, and when the battle ends the
+			// ready/loaded cycle resets so the same seats can rematch
+			// without reporting any results.
+			gameAlice->c->Battle_Loaded();
+			gameBob->c->Battle_Loaded();
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return gameAlice->syncedFired && gameBob->syncedFired;
+				}),
+				"both games loading releases the battle sync barrier"
+			);
+
+			gameAlice->c->Battle_Ended();
+			gameBob->c->Battle_Ended();
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					sf4e::Lobby* lobby = server.registry.FindByKey(lobbyKey);
+					if (!lobby) {
+						return false;
+					}
+					bool flagsClear = true;
+					for (auto memberIter = lobby->members.begin(); memberIter != lobby->members.end(); memberIter++) {
+						flagsClear = flagsClear && !(memberIter->data.flags & SessionProtocol::MF_BATTLE_LOADED);
+					}
+					return !lobby->match.IsAllReady() && flagsClear;
+				}),
+				"battle ended resets the ready and loaded cycle"
+			);
+
+			gameAlice->readyFired = false;
+			gameBob->readyFired = false;
+			chara.charaID = 12;
+			gameAlice->c->PreBattle_SetChara(chara);
+			gameAlice->c->PreBattle_SetEnv(777);
+			gameAlice->c->PreBattle_SetStage(3);
+			gameAlice->c->Lobby_Ready();
+			chara.charaID = 20;
+			gameBob->c->PreBattle_SetChara(chara);
+			gameBob->c->Lobby_Ready();
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return gameAlice->readyFired && gameBob->readyFired;
+				}),
+				"the same seats can ready up again for a rematch"
 			);
 
 			// The opponent's game dying (crash, quit, refused launch)

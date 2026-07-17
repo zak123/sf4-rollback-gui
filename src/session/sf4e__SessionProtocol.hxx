@@ -119,6 +119,8 @@ namespace sf4e {
 			MT_CHAT_EVENT,
 
 			MT_MATCH_HANDOFF,
+
+			MT_BATTLE_ENDED,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(MessageType, {
@@ -152,6 +154,8 @@ namespace sf4e {
 			{MT_CHAT_EVENT, "chat_event"},
 
 			{MT_MATCH_HANDOFF, "match_handoff"},
+
+			{MT_BATTLE_ENDED, "battle_ended"},
 		})
 
 		enum JoinResult {
@@ -323,6 +327,14 @@ namespace sf4e {
 			MessageType type = MT_BATTLE_SYNCED;
 		};
 
+		// Sent by a game when its battle leaves the foreground. The
+		// server resets the ready/loaded cycle so the seated players
+		// can ready up for a rematch- results reporting is optional and
+		// only matters for queue rotation.
+		struct BattleEnded {
+			MessageType type = MT_BATTLE_ENDED;
+		};
+
 		struct StateSnapshot {
 			struct CharaStateSnapshot {
 				int status;
@@ -419,5 +431,6 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleSnapshot, type, snapshot);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleLoaded, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleSynced, type);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleEnded, type);
 	}
 }

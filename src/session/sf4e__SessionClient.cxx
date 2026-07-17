@@ -644,6 +644,17 @@ EResult SessionClient::Battle_Loaded()
 	return result;
 }
 
+EResult SessionClient::Battle_Ended()
+{
+	SessionProtocol::BattleEnded msg;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not send battle ended! Result: {}", (int)result);
+	}
+	return result;
+}
+
 EResult SessionClient::Forward(const SessionProtocol::ConnectionID& dest, const json& fwd) {
 	SessionProtocol::ForwardMessage msg;
 	msg.dest = dest;

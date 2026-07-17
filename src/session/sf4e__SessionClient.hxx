@@ -91,6 +91,7 @@ namespace sf4e {
 		EResult PreBattle_SetStage(int32_t stageID);
 
 		EResult Battle_Loaded();
+		EResult Battle_Ended();
 
 		EResult Forward(const SessionProtocol::ConnectionID& dest, const nlohmann::json& msg);
 

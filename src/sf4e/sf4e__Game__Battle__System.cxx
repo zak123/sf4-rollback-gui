@@ -363,6 +363,11 @@ void fSystem::CloseBattle() {
             SaveState::Free(&saveStates[i]);
         }
     }
+
+    // Local snapshots are per-battle; letting them survive into the
+    // next game trips false desync alarms on rematch (upstream #9).
+    snapshotMap.clear();
+
     (_this->*rSystem::publicMethods.CloseBattle)();
 
 }

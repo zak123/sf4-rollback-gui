@@ -638,6 +638,26 @@ int SessionServer::Step()
 			lobby->sendAllReady = lobby->sendAllReady || lobby->match.IsAllReady();
 			lobby->dirty = true;
 		}
+		else if (type == SessionProtocol::MT_BATTLE_ENDED) {
+			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
+			if (!lobby) {
+				spdlog::info("Server: sender {} sent battle ended, but is not in a lobby", conn);
+				continue;
+			}
+
+			// Reset the ready/loaded cycle so the seated players can
+			// ready up for a rematch. Character and stage picks stay as
+			// convenient defaults; results reporting is optional and
+			// only used for queue rotation. Both games send this, and
+			// the reset is idempotent.
+			lobby->match.readyMessageNum[0] = -1;
+			lobby->match.readyMessageNum[1] = -1;
+			for (auto memberIter = lobby->members.begin(); memberIter != lobby->members.end(); memberIter++) {
+				memberIter->data.flags &= (~SessionProtocol::MF_BATTLE_LOADED);
+			}
+			lobby->ClearHandoffs();
+			lobby->dirty = true;
+		}
 		else if (type == SessionProtocol::MT_LOBBY_REPORTRESULTS) {
 			Lobby* lobby = registry.FindByKey(peerIter->second.lobbyKey);
 			if (!lobby) {

@@ -298,6 +298,13 @@ void fVsBattle::ExitForeground() {
 	if (fUserApp::server) {
 		fUserApp::server->ResetBattleSync();
 	}
+	if (fUserApp::netplay) {
+		// Tell the server this battle is over so it resets the
+		// ready/loaded cycle for a rematch, and drop any desync
+		// snapshots that would false-positive against the next game.
+		fUserApp::netplay->client.Battle_Ended();
+		fUserApp::netplay->client.pendingRemoteSnapshots.clear();
+	}
 	bSessionSentLoaded = false;
 	bSessionSynced = false;
 	nSessionLoadedSentAtMs = 0;
