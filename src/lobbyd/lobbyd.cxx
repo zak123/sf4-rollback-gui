@@ -79,6 +79,12 @@ int main(int argc, char** argv) {
 		"naming a lobby idle in the lounge instead of being seated, so every "
 		"lobby must be created explicitly."
 	);
+	int nMaxPeers = 64;
+	app.add_option(
+		"--max-peers",
+		nMaxPeers,
+		"Most registered users admitted at once; 0 means unlimited"
+	)->check(CLI::Range(0, 10000));
 	app.add_flag("--verbose", bVerbose, "Enable debug logging");
 	CLI11_PARSE(app, argc, argv);
 
@@ -114,6 +120,7 @@ int main(int argc, char** argv) {
 			));
 		}
 		sf4e::SessionServer& server = *pServer;
+		server.maxPeers = (size_t)nMaxPeers;
 		if (server.Listen(nPort) != 0) {
 			spdlog::error("Lobbyd could not listen on port {}", nPort);
 			ret = 1;

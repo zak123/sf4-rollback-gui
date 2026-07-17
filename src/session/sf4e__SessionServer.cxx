@@ -290,6 +290,12 @@ int SessionServer::Step()
 
 			if (peerIter == peers.end()) {
 				// First join request from this connection: register it.
+				if (maxPeers != 0 && peers.size() >= maxPeers) {
+					spdlog::info("Server: rejecting registration, server is full ({} peers)", peers.size());
+					RespondJoinReject(conn, SessionProtocol::JR_SERVER_FULL);
+					continue;
+				}
+
 				// An empty expected hash means "accept any build". Dedicated
 				// dev servers use this before a release hash is pinned, and
 				// connections that don't run the game (ex. lobby browsers)

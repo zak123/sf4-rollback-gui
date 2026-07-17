@@ -223,6 +223,9 @@ int SessionClient::Step()
 			case SessionProtocol::JoinResult::JR_HANDOFF_INVALID:
 				errType = ErrorType::SCE_JOIN_REJECTED_HANDOFF_INVALID;
 				break;
+			case SessionProtocol::JoinResult::JR_SERVER_FULL:
+				errType = ErrorType::SCE_JOIN_REJECTED_SERVER_FULL;
+				break;
 			default:
 				break;
 			}
@@ -236,7 +239,8 @@ int SessionClient::Step()
 			// connected- the user can pick another lobby.
 			if (
 				reject.result == SessionProtocol::JR_HASH_INVALID ||
-				reject.result == SessionProtocol::JR_NAME_TAKEN
+				reject.result == SessionProtocol::JR_NAME_TAKEN ||
+				reject.result == SessionProtocol::JR_SERVER_FULL
 			) {
 				_interface->CloseConnection(_conn, 0, nullptr, false);
 				_conn = k_HSteamNetConnection_Invalid;

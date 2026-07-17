@@ -28,6 +28,7 @@ namespace sf4e {
 			SCE_JOIN_REJECTED_ALREADY_IN_LOBBY,
 			SCE_JOIN_REJECTED_NO_SUCH_LOBBY,
 			SCE_JOIN_REJECTED_HANDOFF_INVALID,
+			SCE_JOIN_REJECTED_SERVER_FULL,
 		};
 
 		// Callback members past OnBattleSynced may be left null by users

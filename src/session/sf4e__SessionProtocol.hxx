@@ -168,6 +168,7 @@ namespace sf4e {
 			JR_ALREADY_IN_LOBBY = 6,
 			JR_NO_SUCH_LOBBY = 7,
 			JR_HANDOFF_INVALID = 8,
+			JR_SERVER_FULL = 9,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(JoinResult, {
@@ -179,7 +180,8 @@ namespace sf4e {
 			{JR_NOT_REGISTERED, "not_registered"},
 			{JR_ALREADY_IN_LOBBY, "already_in_lobby"},
 			{JR_NO_SUCH_LOBBY, "no_such_lobby"},
-			{JR_HANDOFF_INVALID, "handoff_invalid"}
+			{JR_HANDOFF_INVALID, "handoff_invalid"},
+			{JR_SERVER_FULL, "server_full"}
 		})
 
 		struct SessionHelloMsg {

@@ -100,6 +100,11 @@ namespace sf4e {
 			int chatStampIdx = 0;
 		} Peer;
 
+		// The most registered peers this server admits; zero means
+		// unlimited. Seat handoffs are exempt- their games pair with
+		// already-admitted peers.
+		size_t maxPeers = 0;
+
 		// Public for visibility into tests only.
 		std::map<HSteamNetConnection, SessionProtocol::ConnectionID> cidMap;
 		std::map<HSteamNetConnection, Peer> peers;

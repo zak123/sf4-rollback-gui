@@ -141,6 +141,9 @@ static void OnError(SessionClient::ErrorType errType, SessionClient* const c, co
 	case SessionClient::SCE_JOIN_REJECTED_REQUEST_INVALID:
 		g_app.alerts.push_back("Rejected by server: bad request- version mismatch?");
 		break;
+	case SessionClient::SCE_JOIN_REJECTED_SERVER_FULL:
+		g_app.alerts.push_back("The server is full- try again later");
+		break;
 	default:
 		g_app.alerts.push_back("Unknown session error");
 		break;
