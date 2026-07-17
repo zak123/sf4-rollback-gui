@@ -62,13 +62,21 @@ jobs:
           Set-Content -Path "$bd/sidecar-hash.txt" -Value $hash -Encoding ascii -NoNewline
           Write-Host "Sidecar SHA256: $hash"
 
+          # Bundle the x86 C++ runtime so fresh machines (VPSes, testers
+          # without the redist) can run the binaries as-is.
+          $crt = Get-ChildItem "$env:VCToolsRedistDir/x86/Microsoft.VC143.CRT" -Filter "*140.dll" |
+            Where-Object { $_.Name -in @("msvcp140.dll", "vcruntime140.dll") }
+          $crt | Copy-Item -Destination $bd -Force
+
           $runtime = @(
             "GameNetworkingSockets.dll",
             "libprotobuf.dll",
             "libcrypto-3.dll",
             "spdlog.dll",
             "fmt.dll",
-            "abseil_dll.dll"
+            "abseil_dll.dll",
+            "msvcp140.dll",
+            "vcruntime140.dll"
           )
           $client = @("Launcher.exe", "Sidecar.dll", "LobbyClient.exe", "GGPO.dll") + $runtime + @("sidecar-hash.txt")
           $server = @("Lobbyd.exe") + $runtime + @("sidecar-hash.txt")
