@@ -114,6 +114,9 @@ namespace sf4e {
 			MT_LOBBY_LIST,
 			MT_LOBBY_LIST_RESP,
 			MT_LOBBY_LEAVE,
+
+			MT_CHAT_SEND,
+			MT_CHAT_EVENT,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(MessageType, {
@@ -142,6 +145,9 @@ namespace sf4e {
 			{MT_LOBBY_LIST, "lobby_list"},
 			{MT_LOBBY_LIST_RESP, "lobby_list_resp"},
 			{MT_LOBBY_LEAVE, "lobby_leave"},
+
+			{MT_CHAT_SEND, "chat_send"},
+			{MT_CHAT_EVENT, "chat_event"},
 		})
 
 		enum JoinResult {
@@ -240,6 +246,29 @@ namespace sf4e {
 
 		struct LobbyLeave {
 			MessageType type = MT_LOBBY_LEAVE;
+		};
+
+		// The reserved chat channel every registered peer belongs to.
+		// Any other channel value names a lobby key, and reaches only
+		// that lobby's members.
+		extern const char* const CHAT_CHANNEL_LOUNGE;
+
+		// The most bytes of chat text a message may carry; the server
+		// truncates anything longer.
+		const size_t CHAT_TEXT_MAX = 256;
+
+		struct ChatSend {
+			MessageType type = MT_CHAT_SEND;
+			std::string channel;
+			std::string text;
+		};
+
+		struct ChatEvent {
+			MessageType type = MT_CHAT_EVENT;
+			std::string channel;
+			std::string from;
+			std::string text;
+			int64_t ts = 0;
 		};
 
 		struct LobbyReady {
@@ -356,6 +385,8 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyListRequest, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyListResp, type, lobbies);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyLeave, type);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChatSend, type, channel, text);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChatEvent, type, channel, from, text, ts);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyReady, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyAllReady, type);

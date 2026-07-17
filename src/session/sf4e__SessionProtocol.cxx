@@ -15,6 +15,8 @@ namespace sf4e {
 			return this->host == rhs.host && this->key == rhs.key;
 		}
 
+		const char* const CHAT_CHANNEL_LOUNGE = "lounge";
+
 		const LobbyID LobbyID::NULL_LOBBY_ID = { "", "" };
 		const LobbyData LobbyData::NULL_LOBBY = {
 			LobbyID::NULL_LOBBY_ID,

@@ -46,6 +46,7 @@ namespace sf4e {
 		static void SteamNetConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t* pInfo);
 		void OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* pInfo);
 		void BroadcastToLobby(Lobby& lobby, nlohmann::json& msg);
+		void BroadcastToPeers(nlohmann::json& msg);
 		void Respond(HSteamNetConnection client, nlohmann::json& msg);
 		void RespondNullLobbyUpdate(HSteamNetConnection client);
 		void RespondJoinReject(HSteamNetConnection client, SessionProtocol::JoinResult result);
@@ -91,6 +92,12 @@ namespace sf4e {
 		typedef struct Peer {
 			SessionProtocol::MemberData data;
 			std::string lobbyKey;
+
+			// Chat rate limiting: a ring of the timestamps of this
+			// peer's most recent sends. A send is dropped when the
+			// slot it would overwrite is younger than the rate window.
+			uint64_t chatStamps[5] = { 0 };
+			int chatStampIdx = 0;
 		} Peer;
 
 		// Public for visibility into tests only.

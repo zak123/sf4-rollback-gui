@@ -294,6 +294,20 @@ int SessionClient::Step()
 				_callbacks.OnLobbyList(this, _callbacks);
 			}
 		}
+		else if (type == SessionProtocol::MT_CHAT_EVENT) {
+			SessionProtocol::ChatEvent event;
+			try {
+				msg.get_to(event);
+			}
+			catch (json::exception e) {
+				spdlog::info("Client: could not deserialize chat event");
+				continue;
+			}
+
+			if (_callbacks.OnChat) {
+				_callbacks.OnChat(event, this, _callbacks);
+			}
+		}
 		else if (type == SessionProtocol::MT_LOBBY_ALLREADY) {
 			_callbacks.OnReady(this, _callbacks);
 		}
@@ -524,6 +538,19 @@ EResult SessionClient::Lobby_Leave()
 	EResult result = Send(j, nullptr);
 	if (result != k_EResultOK) {
 		spdlog::warn("Client: could not send lobby leave! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Chat_Send(const std::string& channel, const std::string& text)
+{
+	SessionProtocol::ChatSend msg;
+	msg.channel = channel;
+	msg.text = text;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not send chat! Result: {}", (int)result);
 	}
 	return result;
 }

@@ -33,6 +33,7 @@ struct TestClientCtx {
 	int createResult = -1;
 	int listCount = -1;
 	std::vector<SessionProtocol::LobbyListEntry> lastListing;
+	std::vector<SessionProtocol::ChatEvent> chatLog;
 	std::unique_ptr<SessionClient> c;
 };
 
@@ -66,6 +67,12 @@ static void OnLobbyList(SessionClient* const c, const SessionClient::Callbacks& 
 	spdlog::info("[{}] lobby list: {} lobbies", ctx->name, ctx->listCount);
 }
 
+static void OnChat(const SessionProtocol::ChatEvent& event, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	TestClientCtx* ctx = (TestClientCtx*)callbacks.data;
+	ctx->chatLog.push_back(event);
+	spdlog::info("[{}] chat [{}] {}: {}", ctx->name, event.channel, event.from, event.text);
+}
+
 static TestClientCtx* MakeClient(const std::string& name) {
 	TestClientCtx* ctx = new TestClientCtx();
 	ctx->name = name;
@@ -77,6 +84,7 @@ static TestClientCtx* MakeClient(const std::string& name) {
 		OnBattleSynced,
 		OnLobbyCreated,
 		OnLobbyList,
+		OnChat,
 	};
 	std::string mutableName = name;
 	ctx->c.reset(new SessionClient(callbacks, std::string("smokehash"), 24000, mutableName));
@@ -244,6 +252,51 @@ int main(int argc, char** argv) {
 						carol->lastError == SessionClient::SCE_JOIN_REJECTED_NO_SUCH_LOBBY;
 				}),
 				"joining a nonexistent lobby is rejected"
+			);
+
+			// Chat: the lounge reaches every registered peer, lobby
+			// channels reach only that lobby's members.
+			alice->c->Chat_Send(SessionProtocol::CHAT_CHANNEL_LOUNGE, std::string("hello all"));
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return alice->chatLog.size() == 1 &&
+						bob->chatLog.size() == 1 &&
+						carol->chatLog.size() == 1;
+				}),
+				"lounge chat reaches every registered peer"
+			);
+			CHECK(
+				carol->chatLog[0].from == "alice" &&
+				carol->chatLog[0].text == "hello all" &&
+				carol->chatLog[0].channel == SessionProtocol::CHAT_CHANNEL_LOUNGE,
+				"chat events carry sender, text, and channel"
+			);
+
+			std::string lobbyChannel = alice->c->_lobbyData.id.key;
+			alice->c->Chat_Send(lobbyChannel, std::string("gg"));
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return alice->chatLog.size() == 2 && bob->chatLog.size() == 2;
+				}),
+				"lobby chat reaches lobby members"
+			);
+			PumpUntil(server, 300, []() { return false; });
+			CHECK(carol->chatLog.size() == 1, "lobby chat does not reach the lounge");
+
+			carol->c->Chat_Send(lobbyChannel, std::string("sneaky"));
+			PumpUntil(server, 300, []() { return false; });
+			CHECK(
+				alice->chatLog.size() == 2 && bob->chatLog.size() == 2,
+				"chat to a lobby the sender isn't in is dropped"
+			);
+
+			for (int i = 0; i < 8; i++) {
+				bob->c->Chat_Send(SessionProtocol::CHAT_CHANNEL_LOUNGE, std::string("spam"));
+			}
+			PumpUntil(server, 1000, []() { return false; });
+			CHECK(
+				carol->chatLog.size() == 1 + 5,
+				"chat bursts are rate limited to five per window"
 			);
 
 			bob->c->Lobby_Leave();

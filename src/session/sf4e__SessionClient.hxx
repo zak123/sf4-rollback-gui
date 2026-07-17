@@ -38,6 +38,7 @@ namespace sf4e {
 			void (*OnBattleSynced)(SessionClient* const client, const Callbacks& callbacks);
 			void (*OnLobbyCreated)(SessionProtocol::JoinResult result, SessionClient* const client, const Callbacks& callbacks);
 			void (*OnLobbyList)(SessionClient* const client, const Callbacks& callbacks);
+			void (*OnChat)(const SessionProtocol::ChatEvent& event, SessionClient* const client, const Callbacks& callbacks);
 		};
 
 		SessionClient(
@@ -73,6 +74,8 @@ namespace sf4e {
 		EResult Lobby_Leave();
 		EResult Lobby_Ready();
 		EResult Lobby_ReportResults(int loserSide);
+
+		EResult Chat_Send(const std::string& channel, const std::string& text);
 
 		EResult PreBattle_SetEnv(uint32_t rngSeed);
 		EResult PreBattle_SetChara(const Dimps::GameEvents::VsMode::ConfirmedCharaConditions& chara);

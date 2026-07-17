@@ -1,4 +1,5 @@
 #include <string>
+#include <time.h>
 #include <utility>
 #include <vector>
 #include <windows.h>
@@ -25,6 +26,13 @@ using sf4e::SessionServer;
 
 
 const int sf4e::SESSION_SERVER_MAX_MESSAGES_PER_POLL = 200;
+
+// Chat rate limiting: each peer may send CHAT_RATE_BURST messages per
+// rolling CHAT_RATE_WINDOW_MS. The burst count must match the size of
+// Peer::chatStamps.
+static const int CHAT_RATE_BURST = 5;
+static const uint64_t CHAT_RATE_WINDOW_MS = 2000;
+
 SessionServer* SessionServer::s_pCallbackInstance;
 
 SessionServer::SessionServer(std::string identity, std::string sidecarHash) :
@@ -332,6 +340,59 @@ int SessionServer::Step()
 			RemoveFromLobby(conn);
 			RespondNullLobbyUpdate(conn);
 		}
+		else if (type == SessionProtocol::MT_CHAT_SEND) {
+			SessionProtocol::ChatSend request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize chat message");
+				continue;
+			}
+
+			Peer& peer = peerIter->second;
+
+			uint64_t now = GetTickCount64();
+			uint64_t oldest = peer.chatStamps[peer.chatStampIdx];
+			if (oldest != 0 && (now - oldest) < CHAT_RATE_WINDOW_MS) {
+				spdlog::debug("Server: rate limiting chat from \"{}\"", peer.data.name);
+				continue;
+			}
+			peer.chatStamps[peer.chatStampIdx] = now;
+			peer.chatStampIdx = (peer.chatStampIdx + 1) % CHAT_RATE_BURST;
+
+			// Strip control characters and truncate before rebroadcast.
+			std::string text;
+			for (size_t ci = 0; ci < request.text.size() && text.size() < SessionProtocol::CHAT_TEXT_MAX; ci++) {
+				unsigned char c = (unsigned char)request.text[ci];
+				if (c >= 0x20) {
+					text.push_back((char)c);
+				}
+			}
+			if (text.empty()) {
+				continue;
+			}
+
+			SessionProtocol::ChatEvent event;
+			event.channel = request.channel;
+			event.from = peer.data.name;
+			event.text = text;
+			event.ts = (int64_t)time(nullptr);
+			json eventMsg = event;
+
+			if (request.channel == SessionProtocol::CHAT_CHANNEL_LOUNGE) {
+				BroadcastToPeers(eventMsg);
+			}
+			else if (!peer.lobbyKey.empty() && request.channel == peer.lobbyKey) {
+				Lobby* lobby = registry.FindByKey(peer.lobbyKey);
+				if (lobby) {
+					BroadcastToLobby(*lobby, eventMsg);
+				}
+			}
+			else {
+				spdlog::debug("Server: dropping chat from \"{}\" to channel \"{}\" they're not in", peer.data.name, request.channel);
+			}
+		}
 		else if (type == SessionProtocol::MT_FORWARD) {
 			SessionProtocol::ForwardMessage fwdMsg;
 			try {
@@ -579,6 +640,16 @@ void SessionServer::BroadcastToLobby(Lobby& lobby, nlohmann::json& msg) {
 	for (auto iter = lobby.members.begin(); iter != lobby.members.end(); iter++) {
 		_interface->SendMessageToConnection(
 			iter->conn, buf.c_str(), (uint32)buf.length(),
+			k_nSteamNetworkingSend_Reliable, nullptr
+		);
+	}
+}
+
+void SessionServer::BroadcastToPeers(nlohmann::json& msg) {
+	std::string buf = msg.dump();
+	for (auto iter = peers.begin(); iter != peers.end(); iter++) {
+		_interface->SendMessageToConnection(
+			iter->first, buf.c_str(), (uint32)buf.length(),
 			k_nSteamNetworkingSend_Reliable, nullptr
 		);
 	}
