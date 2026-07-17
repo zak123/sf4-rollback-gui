@@ -34,6 +34,7 @@
 #include "sf4e__Game__Battle__System.hxx"
 #include "sf4e__Pad.hxx"
 #include "sf4e__Platform.hxx"
+#include "sf4e__UserApp.hxx"
 
 using Dimps::Platform::WithReleaser;
 
@@ -68,6 +69,13 @@ bool fSystem::bUpdateAllowed = true;
 int fSystem::nExtraFramesToSimulate = 0;
 int fSystem::nNextBattleStartFlowTarget = -1;
 int fSystem::nRandomizeLocalInputsEveryXFramesInGGPO = 0;
+uint64_t fSystem::nGgpoWaitStartMs = 0;
+bool fSystem::bGgpoEverRan = false;
+
+// How long GGPO gets to complete its initial peer synchronization
+// before the match is abandoned- the peer may be unreachable, ex.
+// blocked by NAT or a firewall.
+static const uint64_t GGPO_SYNC_TIMEOUT_MS = 45 * 1000;
 
 GGPOPlayerHandle fSystem::localPlayerHandle = GGPO_INVALID_HANDLE;
 GGPOSession* fSystem::ggpo = nullptr;
@@ -247,6 +255,24 @@ void fSystem::BattleUpdate() {
     static fPadSystem::Inputs randomInputs = { 0, 0 };
 
     if (!bUpdateAllowed) {
+        // A GGPO session that has never reached its running state is
+        // still in the initial peer handshake; give up if it takes
+        // implausibly long.
+        if (ggpo && !bGgpoEverRan) {
+            uint64_t now = GetTickCount64();
+            if (nGgpoWaitStartMs == 0) {
+                nGgpoWaitStartMs = now;
+            }
+            else if (now - nGgpoWaitStartMs > GGPO_SYNC_TIMEOUT_MS) {
+                sf4e::UserApp::AbortNetplay(
+                    "Could not reach the opponent to start the match. "
+                    "One side's network may be blocking game traffic "
+                    "(NAT/firewall).\n\n"
+                    "The game will now close- your lobby app will put "
+                    "you back in the lobby."
+                );
+            }
+        }
         return;
     }
 
@@ -329,7 +355,9 @@ void fSystem::CloseBattle() {
     if (ggpo) {
         ggpo_close_session(ggpo);
         ggpo = nullptr;
-    } 
+    }
+    nGgpoWaitStartMs = 0;
+    bGgpoEverRan = false;
     for (int i = 0; i < NUM_SAVE_STATES; i++) {
         if (saveStates[i].used) {
             SaveState::Free(&saveStates[i]);
@@ -539,6 +567,8 @@ void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int fra
 
     nNextBattleStartFlowTarget = BF__MATCH_START;
     bUpdateAllowed = false;
+    nGgpoWaitStartMs = 0;
+    bGgpoEverRan = false;
     fVsBattle::bTerminateOnNextLeftBattle = true;
     fVsBattle::bOverrideNextRandomSeed = true;
     fVsBattle::nextMatchRandomSeed = rngSeed;
@@ -572,6 +602,8 @@ void fSystem::StartSpectating(unsigned short localport, int num_players, char* h
 
     nNextBattleStartFlowTarget = BF__MATCH_START;
     bUpdateAllowed = false;
+    nGgpoWaitStartMs = 0;
+    bGgpoEverRan = false;
     fVsBattle::bTerminateOnNextLeftBattle = true;
     fVsBattle::bOverrideNextRandomSeed = true;
     fVsBattle::nextMatchRandomSeed = rngSeed;
@@ -682,6 +714,8 @@ bool fSystem::ggpo_on_event_callback(GGPOEvent* info) {
         break;
     case GGPO_EVENTCODE_RUNNING:
         bUpdateAllowed = true;
+        bGgpoEverRan = true;
+        nGgpoWaitStartMs = 0;
         spdlog::info("GGPO: Running");
         break;
     case GGPO_EVENTCODE_CONNECTION_INTERRUPTED:

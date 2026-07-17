@@ -38,6 +38,11 @@ namespace sf4e {
 			static void (*OnTasksRegistered)();
 			static bool bSessionSentLoaded;
 			static bool bSessionSynced;
+
+			// When the loaded notification went out, for timing out a
+			// session sync that never comes (opponent's game failed to
+			// launch or load). Zero when no wait is in progress.
+			static uint64_t nSessionLoadedSentAtMs;
 			static bool bBlockInitialization;
 			static bool bBlockTermination;
 			static bool bForceNextMatchOnline;

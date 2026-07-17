@@ -52,6 +52,13 @@ namespace sf4e {
 				static int nNextBattleStartFlowTarget;
 				static int nRandomizeLocalInputsEveryXFramesInGGPO;
 
+				// GGPO initial-sync watchdog: when the first blocked
+				// update was seen, and whether this session ever reached
+				// its running state (after which halted updates are
+				// intentional, ex. dev tooling, not a stuck handshake).
+				static uint64_t nGgpoWaitStartMs;
+				static bool bGgpoEverRan;
+
 				static bool extendedLoadRequest;
 				static bool extendedSaveRequest;
 				static Dimps::Game::GameMementoKey::MementoID mementoLoadRequest;

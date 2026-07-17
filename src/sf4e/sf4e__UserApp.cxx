@@ -227,6 +227,26 @@ void fUserApp::Install() {
     DetourAttach((PVOID*)&rUserApp::staticMethods.Steam_PostUpdate, Steam_PostUpdate);
 }
 
+void fUserApp::AbortNetplay(const char* szReason) {
+    spdlog::error("Netplay aborted: {}", szReason);
+    MessageBoxA(NULL, szReason, "sf4e netplay", MB_OK | MB_ICONERROR);
+
+    // Tear the session down before dying so the server sees a clean
+    // close instead of a timeout, and give the networking thread a
+    // beat to flush the close before the process is torn out from
+    // under it.
+    if (netplay) {
+        delete netplay.release();
+    }
+    if (server) {
+        delete server.release();
+    }
+    Sleep(250);
+    GameNetworkingSockets_Kill();
+    spdlog::shutdown();
+    ExitProcess(1);
+}
+
 void fUserApp::StartSession(
     char* joinAddr,
     uint16_t port,

@@ -420,11 +420,35 @@ int main(int argc, char** argv) {
 				"a forged handoff token is rejected"
 			);
 
-			gameBob->c->Lobby_Leave();
-			gameAlice->c->Lobby_Leave();
+			// The opponent's game dying (crash, quit, refused launch)
+			// frees its seat and resets the half-agreed match, but the
+			// lobby itself survives for a rematch.
+			gameBob->c->Disconnect();
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					sf4e::Lobby* lobby = server.registry.FindByKey(lobbyKey);
+					return lobby &&
+						lobby->members.size() == 1 &&
+						!lobby->match.IsAllReady();
+				}),
+				"a dying game frees its seat and resets the match"
+			);
+
+			// The app re-seats its user for the rematch, exactly as
+			// TickGameWatch does when it notices the game exited.
+			bob->c->Lobby_Join(bob->handoff.lobby);
+			CHECK(
+				PumpUntil(server, 5000, [&]() {
+					return bob->c->_lobbyData.members.size() == 2;
+				}),
+				"the app re-seats its user after its game exits"
+			);
+
+			gameAlice->c->Disconnect();
+			bob->c->Lobby_Leave();
 			CHECK(
 				PumpUntil(server, 5000, [&]() { return server.registry.lobbies.empty(); }),
-				"empty user lobby is removed after the game connections leave"
+				"empty user lobby is removed after everyone leaves"
 			);
 
 			return 0;

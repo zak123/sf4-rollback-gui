@@ -35,6 +35,11 @@ namespace sf4e {
 
         static void Install();
         static void Steam_PostUpdate();
+
+        // Fatal netplay abort: log, tell the player why, and close the
+        // game. Process death frees the seat server-side, and the lobby
+        // app notices the exit and re-seats its user.
+        static void AbortNetplay(const char* szReason);
         static void StartSession(
             char* joinAddr,
             uint16_t port,

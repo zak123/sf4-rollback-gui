@@ -42,6 +42,12 @@ bool fVsBattle::bBlockTermination = false;
 bool fVsBattle::bForceNextMatchOnline = false;
 bool fVsBattle::bSessionSentLoaded = false;
 bool fVsBattle::bSessionSynced = false;
+uint64_t fVsBattle::nSessionLoadedSentAtMs = 0;
+
+// How long a loaded battle waits for the opponent's loaded notification
+// before giving up. Covers the opponent's full game boot plus battle
+// load on a slow disk.
+static const uint64_t SESSION_SYNC_TIMEOUT_MS = 90 * 1000;
 bool fVsBattle::bOverrideNextRandomSeed = false;
 bool fVsBattle::bTerminateOnNextLeftBattle = false;
 DWORD fVsBattle::nextMatchRandomSeed = 0xffffffff;
@@ -225,9 +231,23 @@ int fVsBattle::HasInitialized() {
 	if (fUserApp::netplay) {
 		if (!bSessionSentLoaded) {
 			bSessionSentLoaded = true;
+			nSessionLoadedSentAtMs = GetTickCount64();
 			fUserApp::netplay->client.Battle_Loaded();
 		}
 		if (!bSessionSynced) {
+			// Don't wait forever- the opponent's game may never have
+			// made it to the battle at all.
+			if (
+				nSessionLoadedSentAtMs != 0 &&
+				GetTickCount64() - nSessionLoadedSentAtMs > SESSION_SYNC_TIMEOUT_MS
+			) {
+				fUserApp::AbortNetplay(
+					"The opponent never finished loading the match. "
+					"Their game may have failed to start.\n\n"
+					"The game will now close- your lobby app will put "
+					"you back in the lobby."
+				);
+			}
 			return 0;
 		}
 	}
@@ -280,6 +300,7 @@ void fVsBattle::ExitForeground() {
 	}
 	bSessionSentLoaded = false;
 	bSessionSynced = false;
+	nSessionLoadedSentAtMs = 0;
 }
 
 void fVsPreBattle::Install() {

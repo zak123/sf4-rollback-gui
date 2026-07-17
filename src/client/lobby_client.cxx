@@ -91,6 +91,13 @@ struct App {
 	bool gameLaunched = false;
 	uint16_t ggpoPort = 23457;
 
+	// The launched game process, watched so the app can reset and
+	// re-seat its user when the match ends (or the game dies).
+	HANDLE hGameProcess = NULL;
+	SessionProtocol::LobbyID rejoinTarget = { "", "" };
+	int rejoinAttempts = 0;
+	uint64_t nextRejoinAt = 0;
+
 	std::mt19937 rand;
 
 	App() {
@@ -125,6 +132,8 @@ static void OnError(SessionClient::ErrorType errType, SessionClient* const c, co
 		break;
 	case SessionClient::SCE_JOIN_REJECTED_NO_SUCH_LOBBY:
 		g_app.alerts.push_back("Could not join: lobby no longer exists");
+		// No sense retrying a rejoin into a dead lobby.
+		g_app.rejoinAttempts = 0;
 		break;
 	case SessionClient::SCE_JOIN_REJECTED_ALREADY_IN_LOBBY:
 		g_app.alerts.push_back("Could not join: already in a lobby");
@@ -199,7 +208,11 @@ static void OnMatchHandoff(const SessionProtocol::MatchHandoff& handoff, Session
 	si.cb = sizeof(si);
 	if (CreateProcessW(szLauncher, cmdW, NULL, NULL, FALSE, 0, NULL, szDir, &si, &pi)) {
 		CloseHandle(pi.hThread);
-		CloseHandle(pi.hProcess);
+		if (g_app.hGameProcess) {
+			CloseHandle(g_app.hGameProcess);
+		}
+		g_app.hGameProcess = pi.hProcess;
+		g_app.rejoinTarget = handoff.lobby;
 		g_app.gameLaunched = true;
 		g_app.alerts.push_back("Match ready- launching the game! Press a button in-game to bind your controller.");
 		spdlog::info("Launched game for lobby {} handoff", handoff.lobby.key);
@@ -250,6 +263,7 @@ static void DropToLogin(const char* reason) {
 	g_app.client.reset();
 	g_app.screen = SCREEN_LOGIN;
 	g_app.bothReady = false;
+	g_app.rejoinAttempts = 0;
 	if (reason) {
 		g_app.alerts.push_back(reason);
 	}
@@ -274,6 +288,38 @@ static void SendChat(const std::string& channel) {
 	}
 	g_app.client->Chat_Send(channel, std::string(g_app.szChatInput));
 	g_app.szChatInput[0] = 0;
+}
+
+// Watch the launched game and, once it exits (match over, or it died),
+// put the user back in their lobby for a rematch. Retries cover the
+// window where the opponent's game still holds its seat.
+static void TickGameWatch() {
+	if (g_app.hGameProcess && WaitForSingleObject(g_app.hGameProcess, 0) == WAIT_OBJECT_0) {
+		CloseHandle(g_app.hGameProcess);
+		g_app.hGameProcess = NULL;
+		g_app.gameLaunched = false;
+		g_app.bothReady = false;
+		g_app.alerts.push_back("The game closed- returning you to the lobby.");
+		g_app.rejoinAttempts = 5;
+		g_app.nextRejoinAt = 0;
+	}
+
+	if (g_app.rejoinAttempts <= 0 || !g_app.client || g_app.client->_cid.user.empty()) {
+		return;
+	}
+
+	if (!g_app.client->_lobbyData.id.key.empty()) {
+		// Seated again- done retrying.
+		g_app.rejoinAttempts = 0;
+		return;
+	}
+
+	uint64_t now = GetTickCount64();
+	if (now >= g_app.nextRejoinAt) {
+		g_app.client->Lobby_Join(g_app.rejoinTarget);
+		g_app.rejoinAttempts--;
+		g_app.nextRejoinAt = now + 2000;
+	}
 }
 
 // -------------------------------------------------------------------
@@ -380,6 +426,9 @@ static void DrawLobbyPanel() {
 	if (ImGui::Button("Leave lobby")) {
 		c.Lobby_Leave();
 		g_app.bothReady = false;
+		// Leaving on purpose also cancels any pending auto-rejoin.
+		g_app.rejoinAttempts = 0;
+		g_app.rejoinTarget = { "", "" };
 		return;
 	}
 	ImGui::Separator();
@@ -668,6 +717,7 @@ int WINAPI wWinMain(
 				DropToLogin("Disconnected from server");
 			}
 		}
+		TickGameWatch();
 
 		MSG msg;
 		while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE))
@@ -748,6 +798,10 @@ int WINAPI wWinMain(
 	::UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
 	g_app.client.reset();
+	if (g_app.hGameProcess) {
+		CloseHandle(g_app.hGameProcess);
+		g_app.hGameProcess = NULL;
+	}
 	GameNetworkingSockets_Kill();
 	spdlog::shutdown();
 
