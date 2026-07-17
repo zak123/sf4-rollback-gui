@@ -124,6 +124,13 @@ target_link_libraries(Lobbyd PRIVATE Session CLI11::CLI11)
 add_executable(SessionSmokeTest "src/session/smoke_test.cxx")
 target_link_libraries(SessionSmokeTest PRIVATE nlohmann_json::nlohmann_json imgui::imgui spdlog::spdlog Dimps sf4e Session "d3d9")
 
+add_executable(LobbyClient WIN32
+    "src/client/lobby_client.cxx"
+    "src/client/sf4e__Roster.hxx"
+)
+target_link_libraries(LobbyClient PRIVATE nlohmann_json::nlohmann_json CLI11::CLI11 imgui::imgui spdlog::spdlog Dimps sf4e Session "d3d9" "shlwapi")
+target_compile_definitions(LobbyClient PRIVATE -D_UNICODE -DUNICODE)
+
 add_executable(SessionInteractiveTest "src/session/interactive_test.cxx")
 target_link_libraries(SessionInteractiveTest PRIVATE nlohmann_json::nlohmann_json imgui::imgui spdlog::spdlog Dimps sf4e Session "d3d9")
 # target_link_options(SessionInteractiveTest PRIVATE "/entry:wWinMainCRTStartup")
