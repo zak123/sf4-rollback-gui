@@ -7,15 +7,9 @@
 #include <spdlog/spdlog.h>
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
-#include <ggponet.h>
 
-#include "../Dimps/Dimps.hxx"
-#include "../Dimps/Dimps__Event.hxx"
 #include "../Dimps/Dimps__GameEvents.hxx"
 #include "../Dimps/Dimps__Math.hxx"
-#include "../Dimps/Dimps__Pad.hxx"
-#include "../sf4e/sf4e__Game__Battle__System.hxx"
-#include "../sf4e/sf4e__GameEvents.hxx"
 
 #include "sf4e__SessionProtocol.hxx"
 #include "sf4e__SessionServer.hxx"
@@ -518,7 +512,10 @@ SessionProtocol::JoinResult SessionServer::RegisterToWait(
 	const SteamNetworkingIPAddr& peerAddr,
 	SessionProtocol::ConnectionID& cid
 ) {
-	if (sidecarHash != _sidecarHash) {
+	// An empty expected hash means "accept any build". Dedicated dev
+	// servers use this before a release hash is pinned, and connections
+	// that don't run the game (ex. lobby browsers) have no sidecar at all.
+	if (!_sidecarHash.empty() && sidecarHash != _sidecarHash) {
 		return SessionProtocol::JR_HASH_INVALID;
 	}
 
