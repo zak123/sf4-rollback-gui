@@ -28,7 +28,7 @@ You need [USF4 on Steam](https://store.steampowered.com/app/45760/)
    [latest release](https://github.com/zak123/sf4-rollback-gui/releases/latest)
    and extract everything into one folder.
 2. Run `LobbyClient.exe`, pick a name, and connect to
-   `44.226.168.62:23450` (address may change between playtests).
+   `sf4.zak123.com:23450`.
 3. Create or join a lobby, pick your character (P1 also picks the
    stage), and hit **Ready**. The game launches on its own.
 4. At the title screen, press a button on the controller you want to
