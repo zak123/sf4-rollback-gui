@@ -63,10 +63,15 @@ jobs:
           Write-Host "Sidecar SHA256: $hash"
 
           # Bundle the x86 C++ runtime so fresh machines (VPSes, testers
-          # without the redist) can run the binaries as-is.
-          $crt = Get-ChildItem "$env:VCToolsRedistDir/x86/Microsoft.VC143.CRT" -Filter "*140.dll" |
-            Where-Object { $_.Name -in @("msvcp140.dll", "vcruntime140.dll") }
-          $crt | Copy-Item -Destination $bd -Force
+          # without the redist) can run the binaries as-is. The CRT
+          # folder name tracks the toolset generation (Microsoft.VC143,
+          # VC144, ...), so glob rather than hardcode it.
+          $crtDir = Get-ChildItem "$env:VCToolsRedistDir/x86" -Directory -Filter "Microsoft.VC*.CRT" |
+            Select-Object -First 1
+          if (-not $crtDir) { throw "Could not locate the x86 CRT redist under $env:VCToolsRedistDir" }
+          Get-ChildItem $crtDir.FullName |
+            Where-Object { $_.Name -in @("msvcp140.dll", "vcruntime140.dll") } |
+            Copy-Item -Destination $bd -Force
 
           $runtime = @(
             "GameNetworkingSockets.dll",
