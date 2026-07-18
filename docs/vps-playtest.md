@@ -46,6 +46,11 @@ means in practice).
      create a fine-grained PAT (this repo only, Contents: read-only) and
      `Set-Content C:\sf4e-lobbyd\github-token.txt "<PAT>" -NoNewline`.
      Delete the file once the repo is public.
+   - Optionally, have successful updates announced to a Discord channel:
+     `Set-Content C:\sf4e-lobbyd\discord-webhook.txt "<webhook url>" -NoNewline`.
+     The post names the new version and links the release so testers
+     know to grab the matching client. Keep webhook URLs out of the
+     repo- anyone holding one can post to the channel.
 4. Register the server and the self-updater as scheduled tasks (admin
    prompt), and start the server:
 

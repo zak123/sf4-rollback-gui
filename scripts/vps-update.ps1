@@ -6,10 +6,13 @@
 # swaps the files, and starts it again. Configuration lives in files
 # beside this script so updates can overwrite the script itself:
 #
-#   version.txt       (managed here) tag of the installed release
-#   github-token.txt  (optional) a fine-grained PAT with read access to
-#                     the repo's contents- required only while the repo
-#                     is private; delete it once the repo is public
+#   version.txt          (managed here) tag of the installed release
+#   github-token.txt     (optional) a fine-grained PAT with read access
+#                        to the repo's contents- required only while the
+#                        repo is private; delete it once the repo is
+#                        public
+#   discord-webhook.txt  (optional) a Discord webhook URL to announce
+#                        successful updates to
 
 $repo = "zak123/sf4-rollback-gui"
 $assetName = "sf4-rollback-gui-server.zip"
@@ -74,4 +77,19 @@ Copy-Item (Join-Path $tmpDir "*") $dir -Force
 Set-Content $versionPath $tag -NoNewline -Encoding ascii
 
 schtasks /run /tn $taskName | Out-Null
+
+# Announce the update, if a webhook is configured. Announcement
+# failures must never affect the update itself.
+$webhookPath = Join-Path $dir "discord-webhook.txt"
+if (Test-Path $webhookPath) {
+	try {
+		$webhook = (Get-Content $webhookPath -Raw).Trim()
+		$msg = "Playtest server updated to $tag and restarted. " +
+			"Everyone needs the matching client zip from this release: $($release.html_url)"
+		$body = @{ content = $msg } | ConvertTo-Json
+		Invoke-RestMethod -Method Post -Uri $webhook -ContentType "application/json" -Body $body | Out-Null
+	}
+	catch {}
+}
+
 Remove-Item $tmpZip, $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
