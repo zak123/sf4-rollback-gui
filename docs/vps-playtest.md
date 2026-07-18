@@ -58,17 +58,22 @@ means in practice).
    The updater checks the repo's **latest GitHub release** every 10
    minutes; when a new one appears it downloads the server bundle,
    stops the server, swaps the files (including the hash pin, the
-   wrapper, and itself), and restarts. Deploying is therefore just:
+   wrapper, and itself), and restarts.
 
-   ```
-   git tag v0.1.1
-   git push origin v0.1.1
-   ```
+## Cutting a release
 
-   CI builds the tag, attaches the bundles to a release, and the VPS
-   picks it up on its next check. Remember testers must grab the
-   matching client zip from the same release- the fresh hash pin locks
-   older builds out (that's the point).
+1. Build the ref you want released: `git push origin main:build` (or
+   the Actions "Run workflow" button). CI builds it, runs the smoke
+   test, and uploads the two bundles as run artifacts.
+2. Download both artifacts from the run and create a GitHub release,
+   attaching both zips. **Keep the exact filenames**
+   (`sf4-rollback-gui-server.zip`, `sf4-rollback-gui-client.zip`)- the
+   VPS updater matches the server asset by name, and both zips must
+   come from the **same run** so the client matches the server's hash
+   pin.
+3. Within ~10 minutes the VPS self-updates to the release. Testers grab
+   the client zip from the same release- the fresh hash pin locks older
+   builds out (that's the point).
 
 ## What playtesters do
 

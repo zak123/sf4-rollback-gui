@@ -1,9 +1,13 @@
 name: build
 
+# Builds are deliberate, not per-commit: push the ref you want built to
+# the "build" branch (ex. `git push origin main:build`), or use the Run
+# workflow button. Grab the two bundles from the run's artifacts and
+# attach them to a GitHub release- keeping the exact filenames, which
+# the VPS self-updater matches on.
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    branches: [ build ]
   pull_request:
   workflow_dispatch:
 
@@ -105,9 +109,3 @@ jobs:
         with:
           name: sf4-rollback-gui-server
           path: dist/sf4-rollback-gui-server.zip
-
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.zip
