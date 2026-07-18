@@ -1,146 +1,122 @@
-﻿# sf4e
+# SF4 Rollback GUI
 
-A process-inspection and modification tool for the Steam release of _Ultra Street Fighter 4_.
+**Modern online play for _Ultra Street Fighter IV_ on Steam: rollback
+netcode, lobbies, and chat. No IP addresses, no port typing, no 2014
+menus.**
 
-> **This repository (`sf4-rollback-gui`) is a productized fork of
-> [sf4e](https://codeberg.org/adanducci/sf4e).** It adds a Fightcade-style
-> lobby service and desktop client — chat, a lobby browser, and
-> launch-into-match — on top of upstream's rollback implementation, which
-> remains maintained by the original author. See
-> [docs/product-design.md](docs/product-design.md) for the architecture and
-> roadmap. Everything below this notice is upstream's original documentation
-> and still applies to building and running the mod itself.
+![The lobby app: lobby browser, create-a-lobby form, and lounge chat](images/lobby-client.png)
 
-[TOC]
+## What is this?
 
-## Running
+USF4 shipped with delay-based netcode: every bit of network lag between
+you and your opponent turns into input lag under your fingers. Modern
+fighting games use **rollback** netcode instead, which keeps your inputs
+instant and hides network hiccups by predicting and correcting the
+opponent's actions. USF4 never got it — this project gives it one.
 
-### Supported environments
-* Windows: Windows 10 or later
-* Linux: Fedora 40+, Steam Deck
+It builds on two pieces:
 
-### Running on Windows
+* **[sf4e](https://codeberg.org/adanducci/sf4e)** by **adanducci** does
+  the genuinely hard part: it injects [GGPO](https://github.com/pond3r/ggpo)
+  rollback into the Steam release of USF4 at runtime, by reverse
+  engineering the game deeply enough to save and restore its entire
+  battle state every frame. No game files are modified on disk.
+* **This fork** wraps that in the experience you'd actually want, in the
+  spirit of Fightcade: a desktop app with a lounge, chat, and a lobby
+  browser, plus dedicated lobby servers. Playing someone is: join their
+  lobby, pick your character, hit Ready — **the game launches itself
+  straight into the match**.
 
-Windows users with a working Steam installation can run sf4e by extracting a release then double-clicking on `Launcher.exe`. sf4e will attempt to detect your SF4 installation automatically. Windows users with uncommon or damaged Steam installations may run `Launcher.exe` with the `STEAM_APP_PATH` environment variable to the absolute path of the `Super Street Fighter IV - Arcade Edition` directory installed by Steam. You can navigate to this directory using the Steam library's context menu by right-clicking on Ultra Street Fighter IV's library entry, hovering over "Manage", then selecting "Browse local files", as shown below.
+When a match ends you're back at the game's menu, both players still
+seated in the lobby; ready up again for infinite runbacks. Close the
+game when you're done and the app puts you back in the lobby chat.
 
-![The Steam right-click context menu, opened on the Ultra Street Fighter 4 library list entry](images/browse-local-files-context-menu.png)
+## Status
 
-### Running on Linux
+**Early playtest.** The lobby experience (chat, browsing, creating and
+joining lobbies) and the launch-into-match flow are working; matches
+that can't connect fail fast with a clear message instead of hanging.
+What this playtest is for: exercising real internet matches between
+real connections, and finding out how often peer-to-peer connections
+succeed without any router setup.
 
-The most straighforward way to launch sf4e on Linux is with [protontricks](https://github.com/Matoking/protontricks). Extract the release, then run `protontricks-launch Launcher.exe` and select SF4 from the popup UI. For convenience, `protontricks-launch --appid 45760 Launcher.exe` can be used to launch sf4e non-interactively, ex. from shell scripts or program shortcuts.
+Not here yet: rankings or match history (rematch freely — nothing is
+tracked), spectating, automatic score detection, and a connection relay
+for stubborn NATs.
 
-Linux users who do not install `protontricks` may set the `STEAM_APP_PATH` environment variable to the path of the the `Super Street Fighter IV - Arcade Edition` directory installed by Steam, as demonstrated above. Users should take care to ensure the variable points to a Windows-formatted path accessible from within the Proton container for SF4, and it may be helpful to take advantage of Wine providing the Linux system root as the `Z:` root inside Wine to specify the path. For example, if the local directory is available at `/home/steamdeck/.local/share/Steam/steamapps/common/Super Street Fighter IV - Arcade Edition`, the corresponding path through the Proton container would be `Z:\\home\\steamdeck\\.local\\share\\Steam\\steamapps\\common\\Super Street Fighter IV - Arcade Edition`.
+## Join the playtest
 
-## Building
+You need:
 
-`sf4e` is built primarily with [Visual Studio](https://visualstudio.microsoft.com/)
-2019 16.10 or later with Visual C++. Other development environments will need
-support for installing dependencies, ideally via [vcpkg](https://vcpkg.io/en/index.html)
-and build file generation via [CMake](https://cmake.org/).
+* **Ultra Street Fighter IV on Steam** ([store page](https://store.steampowered.com/app/45760/)),
+  installed. You must own the game — this project contains no game files.
+* Windows 10 or later.
+* A controller or stick (keyboard works too).
 
-To build sf4e with VS2019 16.10+:
+Steps:
 
-1. Follow steps 1 and 2 in [`vcpkg`'s Getting Started guide](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started),
-   stopping after `vcpkg` has been bootstrapped.
-   - You can stop at step 3- sf4e already has a manfest file.
-2. Set up a local `CMakeUserPresets.json` to describe your environment.
-   The following can be used as a quickstart, making sure to provide the
-   path to the copy of `vcpkg` checked out in step 1: 
-```
-{
-    "version": 2,
-    "configurePresets": [
-      {
-        "name": "default",
-        "inherits": "x86-msvc-ninja-relwithdebinfo",
-        "environment": {
-          "VCPKG_ROOT": "C:/Users/myuser/path/to/vcpkg"
-        }
-      }
-    ]
-  }
-  
-```
-   - Since SF4 is a 32-bit executable, `sf4e` and its dependencies
-     (most importantly Detours) also need to be built targeting a
-     32-bit host to properly hook SF4's instructions.
-3. Open `CMakeLists.txt` with VS2019's native CMake integration.
-   - Ensure [CMakePresets.json integration in Visual Studio](https://learn.microsoft.com/en-us/cpp/build/cmake-presets-vs?view=msvc-170#enable-cmakepresets-json-integration) is enabled.
-4. Run `Build All`. Confirm that `Launcher.exe` and `Sidecar.dll` are in
-   the build output.
-5. Run `Launcher.exe`.
+1. Get the **client bundle** (`sf4e-client.zip`) from whoever invited
+   you, and extract **all** of it into one folder — the DLLs must stay
+   next to the exes.
+2. Run `LobbyClient.exe`. Pick a name, enter the playtest server
+   address you were given (currently `44.226.168.62:23450` — this can
+   change between playtests), and connect.
+3. Say hi in the lounge. Create a lobby or join one from the browser.
+4. Pick your character (the lobby creator also picks the stage) and hit
+   **Ready**. When both players are ready, USF4 launches on its own.
+5. At the title screen, **press a button on the controller you want to
+   play on** — that binds it. The match then starts by itself.
+6. Rematch: after the match, both players ready up again in the window
+   shown in-game. Done playing: close the game and you're back in the
+   lobby app.
 
-To build sf4e with the CMake command line:
+### If a match won't connect
 
-1. Set up `vcpkg`, as above in step 1.
-2. Set up a local `CMakeUserPresets.json` to describe your environment,
-   as above in step 2.
-3. Using a CLI environment with CMake and a compiler prepared, run
-   `cmake --preset default` from the root of the repository.
-   - VS users may wish to use either the x86 Native Tools or the
-     x64_x86 Cross Tools developer command prompts, as they already
-     provide tools like Ninja and Cmake, and have the various environment
-     variables used by CMake already prepared.
-4. Build sf4e by running `cmake --build ./path-to-binary-dir/` from the root
-   of the repository. Confirm that `Launcher.exe` and `Sidecar.dll` are in
-   the build output.
-   * If a `CMakeUserPresets.json` file like the one in step 2 is used, the
-     the binary dir is `./msvc-build/default`.
-5. Run `Launcher.exe`.
+Lobby chat always works, but the match itself is a direct
+peer-to-peer connection between the two players. On most home routers
+it connects on its own. If your matches keep failing after ~45 seconds
+with a "could not reach the opponent" message, forward **UDP port
+23457** on your router to your PC and try again. Two players on the
+same home network usually can't play each other — grab someone outside
+the house.
 
-Builds generated with CMake that cannot take advantage of `vcpkg` will need to
-provide the following dependencies:
+### Reporting problems
 
-* [Detours](https://github.com/microsoft/Detours). Detours is used to install
-  custom netplay hooks at runtime.
-* [ValveFileVDF](https://github.com/TinyTinni/ValveFileVDF). ValveFileVDF
-  is used to parse Steam's configuration files, to automatically detect
-  your installation of SF4.
-* [Dear Imgui](https://github.com/ocornut/imgui). Dear Imgui is used to
-  provide custom overlays for new features and non-durable,
-  development-time debugging.
-* [spdlog](https://github.com/gabime/spdlog). `spdlog` is used to provide
-  durable file logging, both at development time and in release builds.
-* [nlohmann/json](https://github.com/nlohmann/json). `json` is used for
-  message serialization.
-* [GameNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets/).
-  `GamenNetworkingSockets` provides a very helpful high-level API on top
-  of message passing, and additionally supports NAT hole punching if
-  a signalling server is run.
-* [GGPO](https://github.com/pond3r/ggpo), used to provide rollback.
+Tell us what happened, and attach:
 
-## License
+* Logs from `%APPDATA%\sf4e\logs` (both `sf4e.log` and
+  `LobbyClient.log`),
+* a video clip if you can — it's the single most useful thing for
+  netplay bugs.
 
-This project is licensed under the MIT License - see the LICENSE.md file for details.
+## For developers
 
-## External Licenses and Copyright Information
+* [docs/building.md](docs/building.md) — building from source (upstream
+  sf4e's instructions, plus this fork's targets).
+* [docs/product-design.md](docs/product-design.md) — architecture,
+  protocol, and roadmap for the lobby product.
+* [docs/vps-playtest.md](docs/vps-playtest.md) — hosting your own lobby
+  server.
+* `scripts/local-test.bat` — one-click local server + two apps for
+  development.
 
-Street Fighter, Street Fighter 4, Ultra Street Fighter 4, and all related software
-Copyright © CAPCOM.
+Contributions that touch the rollback core itself are usually better
+aimed at [upstream sf4e](https://codeberg.org/adanducci/sf4e) — this
+fork tries to stay a thin product layer over it.
 
-Steam
-Copyright © Valve Corporation.
+## Credits and license
 
-Visual Studio, Visual Studio 2019, vcpkg, and Detours
-Copyright © Microsoft Corporation.
+* **[adanducci](https://codeberg.org/adanducci)** — sf4e: the reverse
+  engineering and rollback implementation this project exists on top of.
+* [GGPO](https://github.com/pond3r/ggpo) (GroundStorm Studios),
+  [GameNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets)
+  (Valve), [Dear ImGui](https://github.com/ocornut/imgui),
+  [spdlog](https://github.com/gabime/spdlog),
+  [nlohmann/json](https://github.com/nlohmann/json),
+  [Detours](https://github.com/microsoft/Detours) (Microsoft),
+  [ValveFileVDF](https://github.com/TinyTinni/ValveFileVDF).
 
-CMake - Cross Platform Makefile Generator
-Copyright © Kitware, Inc. and Contributors.
-
-ValveFileVDF
-Copyright © Matthias Möller.
-
-Dear Imgui
-Copyright © Omar Cornut
-
-spdlog
-Copyright © 2016 Gabi Melman.
-
-nlohmann/json
-Copyright © 2013-2022 Niels Lohmann
-
-GameNetworkingSockets
-Copyright © 2018, Valve Corporation
-
-GGPO (Good Game Peace Out)
-Copyright © GroundStorm Studios, LLC.
+This project is licensed under the MIT License — see
+[LICENSE](LICENSE). Street Fighter, Street Fighter IV, and Ultra Street
+Fighter IV are © CAPCOM. This project is not affiliated with or
+endorsed by Capcom, and requires a legitimately owned copy of the game.
