@@ -42,6 +42,10 @@ namespace sf4e {
 			void (*OnLobbyList)(SessionClient* const client, const Callbacks& callbacks);
 			void (*OnChat)(const SessionProtocol::ChatEvent& event, SessionClient* const client, const Callbacks& callbacks);
 			void (*OnMatchHandoff)(const SessionProtocol::MatchHandoff& handoff, SessionClient* const client, const Callbacks& callbacks);
+			void (*OnPresence)(SessionClient* const client, const Callbacks& callbacks);
+			void (*OnChallengeEvent)(const SessionProtocol::ChallengeEvent& event, SessionClient* const client, const Callbacks& callbacks);
+			void (*OnChallengeResult)(const SessionProtocol::ChallengeResultMsg& result, SessionClient* const client, const Callbacks& callbacks);
+			void (*OnMatchmakeEvent)(const SessionProtocol::MatchmakeEvent& event, SessionClient* const client, const Callbacks& callbacks);
 		};
 
 		SessionClient(
@@ -63,6 +67,8 @@ namespace sf4e {
 		SessionProtocol::LobbyData _lobbyData;
 		SessionProtocol::MatchData _matchData;
 		std::vector<SessionProtocol::LobbyListEntry> _lobbyListing;
+		std::vector<SessionProtocol::PresenceEntry> _presence;
+		int32_t _lookingCount = 0;
 		int64_t _outstandingReadyRequestNumber = -1;
 		bool _snapshotsEnabled;
 
@@ -86,6 +92,11 @@ namespace sf4e {
 		EResult Lobby_ReportResults(int loserSide);
 
 		EResult Chat_Send(const std::string& channel, const std::string& text);
+
+		EResult Presence_RequestList();
+		EResult Challenge_Send(const std::string& target);
+		EResult Challenge_Answer(const std::string& from, bool accept);
+		EResult Matchmake_Set(bool enabled);
 
 		EResult PreBattle_SetEnv(uint32_t rngSeed);
 		EResult PreBattle_SetChara(const Dimps::GameEvents::VsMode::ConfirmedCharaConditions& chara);

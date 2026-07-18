@@ -66,11 +66,11 @@ int main(int argc, char** argv) {
 		"Only admit clients whose Sidecar.dll hash matches. Empty (default) "
 		"accepts any build- fine for development, not for public servers."
 	);
-	app.add_option("--rounds", nRoundCount, "Default lobby: rounds per match")
+	app.add_option("--rounds", nRoundCount, "Rounds per match in server-created lobbies (default, challenge, quickmatch)")
 		->check(CLI::IsMember({ 1, 3, 5, 7 }));
-	app.add_option("--round-time", nRoundTimeSecs, "Default lobby: round timer in seconds")
+	app.add_option("--round-time", nRoundTimeSecs, "Round timer in server-created lobbies")
 		->check(CLI::IsMember({ 30, 60, 99 }));
-	app.add_flag("--no-edition-select", bNoEditionSelect, "Default lobby: disable edition select");
+	app.add_flag("--no-edition-select", bNoEditionSelect, "Disable edition select in server-created lobbies");
 	bool bNoDefaultLobby = false;
 	app.add_flag(
 		"--no-default-lobby",
@@ -121,6 +121,9 @@ int main(int argc, char** argv) {
 		}
 		sf4e::SessionServer& server = *pServer;
 		server.maxPeers = (size_t)nMaxPeers;
+		server.matchEditionSelect = !bNoEditionSelect;
+		server.matchRoundCount = nRoundCount;
+		server.matchRoundTime = FixedPoint{ 0, (short)nRoundTimeSecs };
 		if (server.Listen(nPort) != 0) {
 			spdlog::error("Lobbyd could not listen on port {}", nPort);
 			ret = 1;

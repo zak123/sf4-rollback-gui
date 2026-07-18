@@ -29,6 +29,11 @@ namespace sf4e {
 		// pre-registry behavior of the single built-in lobby.
 		bool persistent = false;
 
+		// Unlisted lobbies are hidden from lobby listings- used for
+		// challenge and quickmatch pairs so a third party can't take a
+		// seat meant for a specific player.
+		bool unlisted = false;
+
 		SessionProtocol::MatchData match;
 		std::vector<LobbyMember> members;
 
@@ -74,7 +79,8 @@ namespace sf4e {
 			int roundCount,
 			Dimps::Math::FixedPoint roundTime,
 			size_t capacity,
-			bool persistent
+			bool persistent,
+			bool unlisted = false
 		);
 		Lobby* FindByKey(const std::string& key);
 		Lobby* FindByConn(HSteamNetConnection conn);

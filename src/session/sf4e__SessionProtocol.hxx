@@ -121,6 +121,15 @@ namespace sf4e {
 			MT_MATCH_HANDOFF,
 
 			MT_BATTLE_ENDED,
+
+			MT_PRESENCE_LIST,
+			MT_PRESENCE_LIST_RESP,
+			MT_CHALLENGE_SEND,
+			MT_CHALLENGE_EVENT,
+			MT_CHALLENGE_ANSWER,
+			MT_CHALLENGE_RESULT,
+			MT_MATCHMAKE,
+			MT_MATCHMAKE_EVENT,
 		};
 
 		NLOHMANN_JSON_SERIALIZE_ENUM(MessageType, {
@@ -156,6 +165,15 @@ namespace sf4e {
 			{MT_MATCH_HANDOFF, "match_handoff"},
 
 			{MT_BATTLE_ENDED, "battle_ended"},
+
+			{MT_PRESENCE_LIST, "presence_list"},
+			{MT_PRESENCE_LIST_RESP, "presence_list_resp"},
+			{MT_CHALLENGE_SEND, "challenge_send"},
+			{MT_CHALLENGE_EVENT, "challenge_event"},
+			{MT_CHALLENGE_ANSWER, "challenge_answer"},
+			{MT_CHALLENGE_RESULT, "challenge_result"},
+			{MT_MATCHMAKE, "matchmake"},
+			{MT_MATCHMAKE_EVENT, "matchmake_event"},
 		})
 
 		enum JoinResult {
@@ -337,6 +355,89 @@ namespace sf4e {
 			MessageType type = MT_BATTLE_ENDED;
 		};
 
+		// One status per display name; a player's app and game
+		// connections are folded together server-side.
+		enum PresenceStatus {
+			PS_LOUNGE = 0,
+			PS_LOOKING = 1,
+			PS_IN_LOBBY = 2,
+			PS_IN_MATCH = 3,
+		};
+
+		NLOHMANN_JSON_SERIALIZE_ENUM(PresenceStatus, {
+			{PS_LOUNGE, "lounge"},
+			{PS_LOOKING, "looking"},
+			{PS_IN_LOBBY, "in_lobby"},
+			{PS_IN_MATCH, "in_match"},
+		})
+
+		struct PresenceEntry {
+			std::string name;
+			PresenceStatus status = PS_LOUNGE;
+		};
+
+		struct PresenceListRequest {
+			MessageType type = MT_PRESENCE_LIST;
+		};
+
+		struct PresenceListResp {
+			MessageType type = MT_PRESENCE_LIST_RESP;
+			std::vector<PresenceEntry> players;
+			int32_t lookingCount = 0;
+		};
+
+		// Private challenges: sender asks for a specific opponent; on
+		// acceptance the server seats both in an unlisted lobby.
+		struct ChallengeSend {
+			MessageType type = MT_CHALLENGE_SEND;
+			std::string target;
+		};
+
+		struct ChallengeEvent {
+			MessageType type = MT_CHALLENGE_EVENT;
+			std::string from;
+		};
+
+		struct ChallengeAnswer {
+			MessageType type = MT_CHALLENGE_ANSWER;
+			std::string from;
+			bool accept = false;
+		};
+
+		enum ChallengeResult {
+			CR_ACCEPTED = 0,
+			CR_DECLINED = 1,
+			CR_EXPIRED = 2,
+			CR_BUSY = 3,
+			CR_OFFLINE = 4,
+		};
+
+		NLOHMANN_JSON_SERIALIZE_ENUM(ChallengeResult, {
+			{CR_ACCEPTED, "accepted"},
+			{CR_DECLINED, "declined"},
+			{CR_EXPIRED, "expired"},
+			{CR_BUSY, "busy"},
+			{CR_OFFLINE, "offline"},
+		})
+
+		struct ChallengeResultMsg {
+			MessageType type = MT_CHALLENGE_RESULT;
+			std::string target;
+			ChallengeResult result = CR_DECLINED;
+		};
+
+		// Quickmatch: flagged lounge players are paired oldest-first
+		// into unlisted lobbies.
+		struct Matchmake {
+			MessageType type = MT_MATCHMAKE;
+			bool enabled = false;
+		};
+
+		struct MatchmakeEvent {
+			MessageType type = MT_MATCHMAKE_EVENT;
+			std::string opponent;
+		};
+
 		struct StateSnapshot {
 			struct CharaStateSnapshot {
 				int status;
@@ -434,5 +535,14 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleLoaded, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleSynced, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BattleEnded, type);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PresenceEntry, name, status);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PresenceListRequest, type);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(PresenceListResp, type, players, lookingCount);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChallengeSend, type, target);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChallengeEvent, type, from);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChallengeAnswer, type, from, accept);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChallengeResultMsg, type, target, result);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Matchmake, type, enabled);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchmakeEvent, type, opponent);
 	}
 }

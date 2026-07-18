@@ -10,6 +10,7 @@
 #endif
 
 #include <deque>
+#include <fstream>
 #include <memory>
 #include <random>
 #include <string>
@@ -74,7 +75,7 @@ struct App {
 	std::unique_ptr<SessionClient> client;
 
 	char szName[32] = { 0 };
-	char szServerAddr[64] = "127.0.0.1:23450";
+	char szServerAddr[64] = "sf4.zak123.com:23450";
 	char szChatInput[SessionProtocol::CHAT_TEXT_MAX] = { 0 };
 	char szNewLobbyName[64] = { 0 };
 	int newLobbyRoundCountIdx = 1;
@@ -99,6 +100,15 @@ struct App {
 	int rejoinAttempts = 0;
 	uint64_t nextRejoinAt = 0;
 
+	// Challenge state: an incoming challenge awaiting an answer, and
+	// the target of our outgoing one.
+	char szChallengeFrom[32] = { 0 };
+	uint64_t challengeReceivedAt = 0;
+	char szChallengeTarget[32] = { 0 };
+
+	// Quickmatch toggle, mirroring the server's queue flag.
+	bool bLooking = false;
+
 	std::mt19937 rand;
 
 	App() {
@@ -116,6 +126,76 @@ static const std::pair<int, const char* const> kRoundCounts[4] = {
 static const std::pair<Dimps::Math::FixedPoint, const char* const> kRoundTimes[3] = {
 	{{0, 30}, "30"}, {{0, 60}, "60"}, {{0, 99}, "99"},
 };
+
+// -------------------------------------------------------------------
+// Config persistence: name, server, and the player's main.
+
+static std::wstring ConfigPath() {
+	PWSTR appdata;
+	std::wstring out;
+	if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &appdata) == S_OK) {
+		wchar_t dir[MAX_PATH];
+		wchar_t file[MAX_PATH];
+		PathCombineW(dir, appdata, L"sf4e");
+		CreateDirectoryW(dir, NULL);
+		PathCombineW(file, dir, L"LobbyClient.json");
+		out = file;
+		CoTaskMemFree(appdata);
+	}
+	return out;
+}
+
+static void LoadConfig() {
+	std::wstring path = ConfigPath();
+	if (path.empty()) {
+		return;
+	}
+	std::ifstream f(path);
+	if (!f.good()) {
+		return;
+	}
+	try {
+		nlohmann::json j;
+		f >> j;
+		strncpy_s(g_app.szName, j.value("name", std::string()).c_str(), _TRUNCATE);
+		strncpy_s(g_app.szServerAddr, j.value("server", std::string(g_app.szServerAddr)).c_str(), _TRUNCATE);
+		g_app.myCharaID = j.value("charaID", 0);
+		g_app.myConditions.color = (BYTE)j.value("color", 0);
+		g_app.myConditions.costume = (BYTE)j.value("costume", 0);
+		g_app.myConditions.ultraCombo = (BYTE)j.value("ultra", 0);
+		g_app.stageID = j.value("stageID", 0);
+	}
+	catch (...) {
+		// A mangled config just means defaults.
+	}
+	if (g_app.myCharaID < 0 || g_app.myCharaID >= Roster::NUM_CHARACTERS) {
+		g_app.myCharaID = 0;
+	}
+	if (g_app.stageID < 0 || g_app.stageID >= Roster::NUM_STAGES) {
+		g_app.stageID = 0;
+	}
+}
+
+static void SaveConfig() {
+	std::wstring path = ConfigPath();
+	if (path.empty()) {
+		return;
+	}
+	try {
+		nlohmann::json j;
+		j["name"] = std::string(g_app.szName);
+		j["server"] = std::string(g_app.szServerAddr);
+		j["charaID"] = g_app.myCharaID;
+		j["color"] = (int)g_app.myConditions.color;
+		j["costume"] = (int)g_app.myConditions.costume;
+		j["ultra"] = (int)g_app.myConditions.ultraCombo;
+		j["stageID"] = g_app.stageID;
+		std::ofstream f(path);
+		f << j.dump(2);
+	}
+	catch (...) {
+	}
+}
 
 // -------------------------------------------------------------------
 // Session client callbacks
@@ -227,6 +307,37 @@ static void OnMatchHandoff(const SessionProtocol::MatchHandoff& handoff, Session
 	}
 }
 
+static void OnChallengeEvent(const SessionProtocol::ChallengeEvent& event, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	strncpy_s(g_app.szChallengeFrom, event.from.c_str(), _TRUNCATE);
+	g_app.challengeReceivedAt = GetTickCount64();
+}
+
+static void OnChallengeResult(const SessionProtocol::ChallengeResultMsg& result, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	switch (result.result) {
+	case SessionProtocol::CR_ACCEPTED:
+		g_app.alerts.push_back(result.target + " accepted- get ready!");
+		break;
+	case SessionProtocol::CR_DECLINED:
+		g_app.alerts.push_back(result.target + " declined the challenge");
+		break;
+	case SessionProtocol::CR_EXPIRED:
+		g_app.alerts.push_back(result.target + " didn't answer");
+		break;
+	case SessionProtocol::CR_BUSY:
+		g_app.alerts.push_back(result.target + " is busy");
+		break;
+	case SessionProtocol::CR_OFFLINE:
+		g_app.alerts.push_back(result.target + " went offline");
+		break;
+	}
+	g_app.szChallengeTarget[0] = 0;
+}
+
+static void OnMatchmakeEvent(const SessionProtocol::MatchmakeEvent& event, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	g_app.alerts.push_back("Matched with " + event.opponent + "!");
+	g_app.bLooking = false;
+}
+
 static SessionClient::Callbacks kCallbacks = {
 	nullptr,
 	OnError,
@@ -236,6 +347,10 @@ static SessionClient::Callbacks kCallbacks = {
 	OnLobbyList,
 	OnChat,
 	OnMatchHandoff,
+	nullptr,
+	OnChallengeEvent,
+	OnChallengeResult,
+	OnMatchmakeEvent,
 };
 
 // -------------------------------------------------------------------
@@ -261,8 +376,12 @@ static void ConnectToServer() {
 
 	g_app.chatLog.clear();
 	g_app.bothReady = false;
+	g_app.bLooking = false;
+	g_app.szChallengeFrom[0] = 0;
+	g_app.szChallengeTarget[0] = 0;
 	g_app.nextListRefresh = 0;
 	g_app.screen = SCREEN_SESSION;
+	SaveConfig();
 }
 
 static void DropToLogin(const char* reason) {
@@ -270,6 +389,9 @@ static void DropToLogin(const char* reason) {
 	g_app.screen = SCREEN_LOGIN;
 	g_app.bothReady = false;
 	g_app.rejoinAttempts = 0;
+	g_app.bLooking = false;
+	g_app.szChallengeFrom[0] = 0;
+	g_app.szChallengeTarget[0] = 0;
 	if (reason) {
 		g_app.alerts.push_back(reason);
 	}
@@ -325,6 +447,16 @@ static void TickGameWatch() {
 		g_app.client->Lobby_Join(g_app.rejoinTarget);
 		g_app.rejoinAttempts--;
 		g_app.nextRejoinAt = now + 2000;
+	}
+}
+
+// An unanswered incoming challenge quietly expires on this side too.
+static void TickChallengeExpiry() {
+	if (
+		g_app.szChallengeFrom[0] != 0 &&
+		GetTickCount64() - g_app.challengeReceivedAt > 30 * 1000
+	) {
+		g_app.szChallengeFrom[0] = 0;
 	}
 }
 
@@ -490,6 +622,7 @@ static void DrawLobbyPanel() {
 
 	if (ImGui::Button("Ready", ImVec2(120, 0))) {
 		g_app.myConditions.charaID = g_app.myCharaID;
+		SaveConfig();
 		bool ok = c.PreBattle_SetChara(g_app.myConditions) == k_EResultOK;
 		if (ok && mySide == 0) {
 			ok = ok && c.PreBattle_SetEnv(g_app.rand()) == k_EResultOK;
@@ -502,6 +635,59 @@ static void DrawLobbyPanel() {
 			g_app.alerts.push_back("Could not send match setup");
 		}
 	}
+}
+
+static const char* PresenceStatusLabel(SessionProtocol::PresenceStatus status) {
+	switch (status) {
+	case SessionProtocol::PS_LOOKING: return "looking";
+	case SessionProtocol::PS_IN_LOBBY: return "in lobby";
+	case SessionProtocol::PS_IN_MATCH: return "in match";
+	default: return "lounge";
+	}
+}
+
+static void DrawPlayersPane() {
+	SessionClient& c = *g_app.client;
+	bool inLounge = c._lobbyData.id.key.empty();
+
+	ImGui::Text("Players (%d)", (int)c._presence.size());
+	ImGui::Separator();
+
+	ImGui::BeginDisabled(!inLounge);
+	if (ImGui::Checkbox("Looking for match", &g_app.bLooking)) {
+		c.Matchmake_Set(g_app.bLooking);
+	}
+	ImGui::EndDisabled();
+	if (g_app.bLooking) {
+		ImGui::TextDisabled("Searching- %d in queue", c._lookingCount);
+	}
+	ImGui::Separator();
+
+	ImGui::BeginChild("players_scroll", ImVec2(0, 0));
+	for (int i = 0; i < (int)c._presence.size(); i++) {
+		SessionProtocol::PresenceEntry& entry = c._presence[i];
+		bool isMe = entry.name == c._name;
+		bool challengeable =
+			!isMe &&
+			inLounge &&
+			(entry.status == SessionProtocol::PS_LOUNGE || entry.status == SessionProtocol::PS_LOOKING);
+
+		ImGui::PushID(i);
+		if (challengeable && ImGui::SmallButton("vs")) {
+			if (c.Challenge_Send(entry.name) == k_EResultOK) {
+				strncpy_s(g_app.szChallengeTarget, entry.name.c_str(), _TRUNCATE);
+				g_app.alerts.push_back("Challenge sent to " + entry.name);
+			}
+		}
+		if (challengeable) {
+			ImGui::SameLine();
+		}
+		ImGui::Text("%s%s", entry.name.c_str(), isMe ? " (you)" : "");
+		ImGui::SameLine();
+		ImGui::TextDisabled("- %s", PresenceStatusLabel(entry.status));
+		ImGui::PopID();
+	}
+	ImGui::EndChild();
 }
 
 static void DrawChatPane() {
@@ -584,11 +770,38 @@ static void DrawSessionScreen() {
 	ImGui::Separator();
 	DrawAlerts();
 
-	// Refresh the lobby list on a timer while browsing.
-	if (!inLobby) {
+	// An incoming challenge gets an actionable banner.
+	if (g_app.szChallengeFrom[0] != 0) {
+		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 200, 60, 255));
+		ImGui::Text("%s wants to fight!", g_app.szChallengeFrom);
+		ImGui::PopStyleColor();
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Accept")) {
+			c.Challenge_Answer(std::string(g_app.szChallengeFrom), true);
+			g_app.szChallengeFrom[0] = 0;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Decline")) {
+			c.Challenge_Answer(std::string(g_app.szChallengeFrom), false);
+			g_app.szChallengeFrom[0] = 0;
+		}
+		ImGui::Separator();
+	}
+
+	// Seated anywhere means the server dropped us from the quickmatch
+	// queue; mirror that.
+	if (inLobby) {
+		g_app.bLooking = false;
+	}
+
+	// Poll presence always, and the lobby list while browsing.
+	{
 		uint64_t now = GetTickCount64();
 		if (now >= g_app.nextListRefresh) {
-			c.Lobby_RequestList();
+			c.Presence_RequestList();
+			if (!inLobby) {
+				c.Lobby_RequestList();
+			}
 			g_app.nextListRefresh = now + LOBBY_LIST_REFRESH_MS;
 		}
 	}
@@ -602,8 +815,12 @@ static void DrawSessionScreen() {
 	}
 	ImGui::EndChild();
 	ImGui::SameLine();
-	ImGui::BeginChild("right_pane", ImVec2(0, 0), true);
+	ImGui::BeginChild("chat_pane", ImVec2(-210, 0), true);
 	DrawChatPane();
+	ImGui::EndChild();
+	ImGui::SameLine();
+	ImGui::BeginChild("players_pane", ImVec2(0, 0), true);
+	DrawPlayersPane();
 	ImGui::EndChild();
 }
 
@@ -616,8 +833,13 @@ static void SetUpLogging(bool bShowConsole) {
 	PWSTR path;
 	if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &path) == S_OK) {
 		try {
+			// Per-process filename: two instances on one machine (the
+			// standard local test setup) otherwise truncate each
+			// other's logs through rotate-on-open.
+			wchar_t logname[64];
+			swprintf_s(logname, L"sf4e/logs/LobbyClient-%u.log", GetCurrentProcessId());
 			wchar_t logpath[MAX_PATH];
-			PathCombineW(logpath, path, L"sf4e/logs/LobbyClient.log");
+			PathCombineW(logpath, path, logname);
 			sinks.push_back(std::shared_ptr<spdlog::sinks::rotating_file_sink_mt>(
 				new spdlog::sinks::rotating_file_sink_mt(logpath, 1048576 * 5, 3, true)
 			));
@@ -663,6 +885,7 @@ int WINAPI wWinMain(
 	CLI11_PARSE(app, argc, argv);
 
 	SetUpLogging(bShowConsole);
+	LoadConfig();
 
 	SteamDatagramErrMsg errMsg;
 	if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
@@ -689,10 +912,12 @@ int WINAPI wWinMain(
 
 	if (!CreateDeviceD3D(hwnd))
 	{
+		spdlog::error("CreateDeviceD3D failed");
 		CleanupDeviceD3D();
 		::UnregisterClassW(wc.lpszClassName, wc.hInstance);
 		return 1;
 	}
+	spdlog::info("D3D device created");
 
 	::ShowWindow(hwnd, SW_SHOWDEFAULT);
 	::UpdateWindow(hwnd);
@@ -725,6 +950,7 @@ int WINAPI wWinMain(
 			}
 		}
 		TickGameWatch();
+		TickChallengeExpiry();
 
 		MSG msg;
 		while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE))
@@ -739,7 +965,12 @@ int WINAPI wWinMain(
 
 		if (g_DeviceLost)
 		{
+			static uint64_t s_lastLostLog = 0;
 			HRESULT hr = g_pd3dDevice->TestCooperativeLevel();
+			if (GetTickCount64() - s_lastLostLog > 1000) {
+				s_lastLostLog = GetTickCount64();
+				spdlog::warn("D3D device lost; TestCooperativeLevel = {:#x}", (unsigned)hr);
+			}
 			if (hr == D3DERR_DEVICELOST)
 			{
 				::Sleep(10);
@@ -748,6 +979,7 @@ int WINAPI wWinMain(
 			if (hr == D3DERR_DEVICENOTRESET)
 				ResetDevice();
 			g_DeviceLost = false;
+			spdlog::info("D3D device recovered");
 		}
 
 		if (g_ResizeWidth != 0 && g_ResizeHeight != 0)
@@ -792,8 +1024,11 @@ int WINAPI wWinMain(
 			g_pd3dDevice->EndScene();
 		}
 		HRESULT result = g_pd3dDevice->Present(nullptr, nullptr, nullptr, nullptr);
-		if (result == D3DERR_DEVICELOST)
+		if (result == D3DERR_DEVICELOST && !g_DeviceLost)
+		{
 			g_DeviceLost = true;
+			spdlog::warn("Present reported device lost");
+		}
 	}
 
 	ImGui_ImplDX9_Shutdown();

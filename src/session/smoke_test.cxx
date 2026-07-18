@@ -38,6 +38,13 @@ struct TestClientCtx {
 	SessionProtocol::MatchHandoff handoff;
 	std::vector<SessionProtocol::LobbyListEntry> lastListing;
 	std::vector<SessionProtocol::ChatEvent> chatLog;
+	std::vector<SessionProtocol::PresenceEntry> presence;
+	int lookingCount = -1;
+	int presenceVersion = 0;
+	std::string challengeFrom;
+	bool gotChallengeResult = false;
+	SessionProtocol::ChallengeResultMsg lastChallengeResult;
+	std::string matchedOpponent;
 	std::unique_ptr<SessionClient> c;
 };
 
@@ -85,6 +92,32 @@ static void OnMatchHandoff(const SessionProtocol::MatchHandoff& handoff, Session
 	spdlog::info("[{}] match handoff for lobby {}", ctx->name, handoff.lobby.key);
 }
 
+static void OnPresence(SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	TestClientCtx* ctx = (TestClientCtx*)callbacks.data;
+	ctx->presence = c->_presence;
+	ctx->lookingCount = c->_lookingCount;
+	ctx->presenceVersion++;
+}
+
+static void OnChallengeEvent(const SessionProtocol::ChallengeEvent& event, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	TestClientCtx* ctx = (TestClientCtx*)callbacks.data;
+	ctx->challengeFrom = event.from;
+	spdlog::info("[{}] challenged by {}", ctx->name, event.from);
+}
+
+static void OnChallengeResult(const SessionProtocol::ChallengeResultMsg& result, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	TestClientCtx* ctx = (TestClientCtx*)callbacks.data;
+	ctx->lastChallengeResult = result;
+	ctx->gotChallengeResult = true;
+	spdlog::info("[{}] challenge result for {}: {}", ctx->name, result.target, (int)result.result);
+}
+
+static void OnMatchmakeEvent(const SessionProtocol::MatchmakeEvent& event, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	TestClientCtx* ctx = (TestClientCtx*)callbacks.data;
+	ctx->matchedOpponent = event.opponent;
+	spdlog::info("[{}] matched with {}", ctx->name, event.opponent);
+}
+
 static TestClientCtx* MakeClient(
 	const std::string& name,
 	uint16_t ggpoPort,
@@ -105,6 +138,10 @@ static TestClientCtx* MakeClient(
 		OnLobbyList,
 		OnChat,
 		OnMatchHandoff,
+		OnPresence,
+		OnChallengeEvent,
+		OnChallengeResult,
+		OnMatchmakeEvent,
 	};
 	std::string mutableName = name;
 	std::string mutableHash = sidecarHash;
@@ -580,6 +617,189 @@ int main(int argc, char** argv) {
 			}
 			pinned.Step();
 			pinned.Close();
+			for (auto iter = g_clients.begin(); iter != g_clients.end(); iter++) {
+				delete *iter;
+			}
+			g_clients.clear();
+		}
+	}
+
+	// Scenario 3: presence, private challenges, and quickmatch.
+	if (ret == 0) {
+		const uint16_t SOCIAL_PORT = TEST_PORT + 2;
+		SessionServer social(std::string("smokehost"), std::string(""));
+		social.challengeTtlMs = 300;
+		if (social.Listen(SOCIAL_PORT) != 0) {
+			spdlog::error("FAIL: could not listen on {}", SOCIAL_PORT);
+			ret = 1;
+		}
+		else {
+			ret = [&social, SOCIAL_PORT]() -> int {
+				SessionProtocol::LobbyID noLobby = { "", "" };
+				TestClientCtx* dave = MakeClient("dave", 24010, noLobby, std::string(), std::string(""), SOCIAL_PORT);
+				g_clients.push_back(dave);
+				TestClientCtx* erin = MakeClient("erin", 24011, noLobby, std::string(), std::string(""), SOCIAL_PORT);
+				g_clients.push_back(erin);
+				TestClientCtx* frank = MakeClient("frank", 24012, noLobby, std::string(), std::string(""), SOCIAL_PORT);
+				g_clients.push_back(frank);
+				CHECK(
+					PumpUntil(social, 5000, [&]() { return social.peers.size() == 3; }),
+					"dave, erin, and frank register"
+				);
+
+				auto statusOf = [](TestClientCtx* who, const std::string& name) -> int {
+					for (auto iter = who->presence.begin(); iter != who->presence.end(); iter++) {
+						if (iter->name == name) {
+							return (int)iter->status;
+						}
+					}
+					return -1;
+				};
+				auto refreshPresence = [&social](TestClientCtx* who) -> bool {
+					int version = who->presenceVersion;
+					who->c->Presence_RequestList();
+					return PumpUntil(social, 5000, [&]() { return who->presenceVersion > version; });
+				};
+
+				CHECK(
+					refreshPresence(dave) &&
+					dave->presence.size() == 3 &&
+					statusOf(dave, "dave") == (int)SessionProtocol::PS_LOUNGE &&
+					statusOf(dave, "erin") == (int)SessionProtocol::PS_LOUNGE &&
+					statusOf(dave, "frank") == (int)SessionProtocol::PS_LOUNGE,
+					"presence lists every player in the lounge"
+				);
+
+				// Decline round trip.
+				dave->c->Challenge_Send(std::string("erin"));
+				CHECK(
+					PumpUntil(social, 5000, [&]() { return erin->challengeFrom == "dave"; }),
+					"the challenge reaches its target"
+				);
+				erin->c->Challenge_Answer(std::string("dave"), false);
+				CHECK(
+					PumpUntil(social, 5000, [&]() {
+						return dave->gotChallengeResult &&
+							dave->lastChallengeResult.result == SessionProtocol::CR_DECLINED;
+					}),
+					"a declined challenge reports back"
+				);
+
+				// Accept round trip pairs both into an unlisted lobby.
+				dave->gotChallengeResult = false;
+				erin->challengeFrom.clear();
+				dave->c->Challenge_Send(std::string("erin"));
+				CHECK(
+					PumpUntil(social, 5000, [&]() { return erin->challengeFrom == "dave"; }),
+					"the rematch challenge reaches its target"
+				);
+				erin->c->Challenge_Answer(std::string("dave"), true);
+				CHECK(
+					PumpUntil(social, 5000, [&]() {
+						return dave->gotChallengeResult &&
+							dave->lastChallengeResult.result == SessionProtocol::CR_ACCEPTED &&
+							dave->c->_lobbyData.members.size() == 2 &&
+							erin->c->_lobbyData.members.size() == 2;
+					}),
+					"an accepted challenge seats both players together"
+				);
+				frank->listCount = -1;
+				frank->c->Lobby_RequestList();
+				CHECK(
+					PumpUntil(social, 5000, [&]() { return frank->listCount == 0; }),
+					"challenge lobbies are unlisted"
+				);
+				CHECK(
+					refreshPresence(frank) &&
+					statusOf(frank, "dave") == (int)SessionProtocol::PS_IN_LOBBY,
+					"presence shows challenged players in a lobby"
+				);
+
+				// Challenging someone already seated is refused as busy.
+				frank->gotChallengeResult = false;
+				frank->c->Challenge_Send(std::string("dave"));
+				CHECK(
+					PumpUntil(social, 5000, [&]() {
+						return frank->gotChallengeResult &&
+							frank->lastChallengeResult.result == SessionProtocol::CR_BUSY;
+					}),
+					"challenging a seated player reports busy"
+				);
+
+				dave->c->Lobby_Leave();
+				erin->c->Lobby_Leave();
+				CHECK(
+					PumpUntil(social, 5000, [&]() { return social.registry.lobbies.empty(); }),
+					"the challenge lobby empties away"
+				);
+
+				// An unanswered challenge expires (shortened TTL).
+				frank->gotChallengeResult = false;
+				frank->c->Challenge_Send(std::string("erin"));
+				CHECK(
+					PumpUntil(social, 5000, [&]() {
+						return frank->gotChallengeResult &&
+							frank->lastChallengeResult.result == SessionProtocol::CR_EXPIRED;
+					}),
+					"an unanswered challenge expires"
+				);
+				erin->challengeFrom.clear();
+
+				// Quickmatch pairs the two queued players.
+				dave->c->Matchmake_Set(true);
+				PumpUntil(social, 300, []() { return false; });
+				CHECK(
+					refreshPresence(frank) && frank->lookingCount == 1,
+					"the quickmatch queue is visible in presence"
+				);
+				erin->c->Matchmake_Set(true);
+				CHECK(
+					PumpUntil(social, 5000, [&]() {
+						return dave->matchedOpponent == "erin" &&
+							erin->matchedOpponent == "dave" &&
+							dave->c->_lobbyData.members.size() == 2 &&
+							erin->c->_lobbyData.members.size() == 2;
+					}),
+					"quickmatch pairs both queued players"
+				);
+				frank->listCount = -1;
+				frank->c->Lobby_RequestList();
+				CHECK(
+					PumpUntil(social, 5000, [&]() { return frank->listCount == 0; }),
+					"quickmatch lobbies are unlisted"
+				);
+				CHECK(
+					refreshPresence(frank) && frank->lookingCount == 0,
+					"pairing clears the quickmatch queue"
+				);
+
+				// A challenged player going offline reports back.
+				dave->c->Lobby_Leave();
+				erin->c->Lobby_Leave();
+				PumpUntil(social, 300, []() { return false; });
+				frank->gotChallengeResult = false;
+				frank->c->Challenge_Send(std::string("dave"));
+				CHECK(
+					PumpUntil(social, 5000, [&]() { return dave->challengeFrom == "frank"; }),
+					"the offline-test challenge reaches its target"
+				);
+				dave->c->Disconnect();
+				CHECK(
+					PumpUntil(social, 5000, [&]() {
+						return frank->gotChallengeResult &&
+							frank->lastChallengeResult.result == SessionProtocol::CR_OFFLINE;
+					}),
+					"a challenged player disconnecting reports offline"
+				);
+
+				return 0;
+			}();
+
+			for (auto iter = g_clients.begin(); iter != g_clients.end(); iter++) {
+				(*iter)->c->Disconnect();
+			}
+			social.Step();
+			social.Close();
 			for (auto iter = g_clients.begin(); iter != g_clients.end(); iter++) {
 				delete *iter;
 			}

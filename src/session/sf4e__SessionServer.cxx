@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <random>
 #include <string>
 #include <time.h>
@@ -66,6 +67,9 @@ SessionServer::SessionServer(std::string identity, std::string sidecarHash) :
 SessionServer::SessionServer(std::string identity, std::string sidecarHash, bool editionSelect, int roundCount, FixedPoint roundTime) :
 	SessionServer(identity, sidecarHash)
 {
+	matchEditionSelect = editionSelect;
+	matchRoundCount = roundCount;
+	matchRoundTime = roundTime;
 	Lobby* defaultLobby = registry.Create(
 		"main",
 		editionSelect,
@@ -431,6 +435,9 @@ int SessionServer::Step()
 			SessionProtocol::LobbyListResp resp;
 			for (auto iter = registry.lobbies.begin(); iter != registry.lobbies.end(); iter++) {
 				Lobby& lobby = iter->second;
+				if (lobby.unlisted) {
+					continue;
+				}
 				SessionProtocol::LobbyListEntry entry;
 				entry.id = lobby.id;
 				entry.name = lobby.displayName;
@@ -451,6 +458,175 @@ int SessionServer::Step()
 			}
 			RemoveFromLobby(conn);
 			RespondNullLobbyUpdate(conn);
+		}
+		else if (type == SessionProtocol::MT_PRESENCE_LIST) {
+			// One entry per display name; a player's app and game
+			// connections fold into whichever status ranks highest.
+			std::map<std::string, SessionProtocol::PresenceStatus> statuses;
+			int32_t lookingCount = 0;
+			for (auto pIter = peers.begin(); pIter != peers.end(); pIter++) {
+				Peer& p = pIter->second;
+				SessionProtocol::PresenceStatus status = SessionProtocol::PS_LOUNGE;
+				if (!p.lobbyKey.empty()) {
+					status = SessionProtocol::PS_IN_LOBBY;
+					Lobby* lobby = registry.FindByKey(p.lobbyKey);
+					if (lobby) {
+						bool live = lobby->match.IsAllReady();
+						for (auto mIter = lobby->members.begin(); !live && mIter != lobby->members.end(); mIter++) {
+							live = (mIter->data.flags & SessionProtocol::MF_BATTLE_LOADED) != 0;
+						}
+						if (live) {
+							status = SessionProtocol::PS_IN_MATCH;
+						}
+					}
+				}
+				else if (p.lookingForMatch) {
+					status = SessionProtocol::PS_LOOKING;
+					lookingCount++;
+				}
+
+				auto existing = statuses.find(p.data.name);
+				if (existing == statuses.end() || status > existing->second) {
+					statuses[p.data.name] = status;
+				}
+			}
+
+			SessionProtocol::PresenceListResp resp;
+			resp.lookingCount = lookingCount;
+			for (auto sIter = statuses.begin(); sIter != statuses.end(); sIter++) {
+				SessionProtocol::PresenceEntry entry;
+				entry.name = sIter->first;
+				entry.status = sIter->second;
+				resp.players.push_back(entry);
+			}
+			json respMsg = resp;
+			Respond(conn, respMsg);
+		}
+		else if (type == SessionProtocol::MT_CHALLENGE_SEND) {
+			SessionProtocol::ChallengeSend request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize challenge");
+				continue;
+			}
+
+			Peer& sender = peerIter->second;
+			if (!sender.lobbyKey.empty() || request.target == sender.data.name || request.target.empty()) {
+				continue;
+			}
+			if (!sender.challengeTarget.empty()) {
+				// One outstanding challenge at a time.
+				continue;
+			}
+
+			// The target must have a lounge (app) connection; any seated
+			// connection under that name means they're busy.
+			HSteamNetConnection targetConn = k_HSteamNetConnection_Invalid;
+			bool targetSeated = false;
+			for (auto pIter = peers.begin(); pIter != peers.end(); pIter++) {
+				if (pIter->second.data.name != request.target) {
+					continue;
+				}
+				if (pIter->second.lobbyKey.empty()) {
+					targetConn = pIter->first;
+				}
+				else {
+					targetSeated = true;
+				}
+			}
+			// Busy outranks offline: a seated player has no lounge
+			// connection but is very much present.
+			if (targetSeated) {
+				RespondChallengeResult(conn, request.target, SessionProtocol::CR_BUSY);
+				continue;
+			}
+			if (targetConn == k_HSteamNetConnection_Invalid) {
+				RespondChallengeResult(conn, request.target, SessionProtocol::CR_OFFLINE);
+				continue;
+			}
+
+			sender.challengeTarget = request.target;
+			sender.challengeSentAtMs = GetTickCount64();
+
+			SessionProtocol::ChallengeEvent event;
+			event.from = sender.data.name;
+			json eventMsg = event;
+			Respond(targetConn, eventMsg);
+		}
+		else if (type == SessionProtocol::MT_CHALLENGE_ANSWER) {
+			SessionProtocol::ChallengeAnswer answer;
+			try {
+				msg.get_to(answer);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize challenge answer");
+				continue;
+			}
+
+			Peer& answerer = peerIter->second;
+
+			// Find the challenger: the peer named `from` whose
+			// outstanding challenge targets the answerer.
+			HSteamNetConnection challengerConn = k_HSteamNetConnection_Invalid;
+			for (auto pIter = peers.begin(); pIter != peers.end(); pIter++) {
+				if (
+					pIter->second.data.name == answer.from &&
+					pIter->second.challengeTarget == answerer.data.name
+				) {
+					challengerConn = pIter->first;
+					break;
+				}
+			}
+			if (challengerConn == k_HSteamNetConnection_Invalid) {
+				// Stale answer- the challenge expired or was withdrawn.
+				continue;
+			}
+			Peer& challenger = peers[challengerConn];
+			challenger.challengeTarget.clear();
+			challenger.challengeSentAtMs = 0;
+
+			if (!answer.accept) {
+				RespondChallengeResult(challengerConn, answerer.data.name, SessionProtocol::CR_DECLINED);
+				continue;
+			}
+
+			// Both must still be in the lounge to pair up.
+			if (!challenger.lobbyKey.empty() || !answerer.lobbyKey.empty()) {
+				RespondChallengeResult(challengerConn, answerer.data.name, SessionProtocol::CR_BUSY);
+				RespondChallengeResult(conn, answer.from, SessionProtocol::CR_BUSY);
+				continue;
+			}
+
+			CreatePairLobby(
+				challenger.data.name + " vs " + answerer.data.name,
+				challengerConn,
+				conn
+			);
+			RespondChallengeResult(challengerConn, answerer.data.name, SessionProtocol::CR_ACCEPTED);
+		}
+		else if (type == SessionProtocol::MT_MATCHMAKE) {
+			SessionProtocol::Matchmake request;
+			try {
+				msg.get_to(request);
+			}
+			catch (json::exception e) {
+				spdlog::info("Server: could not deserialize matchmake");
+				continue;
+			}
+
+			Peer& p = peerIter->second;
+			if (request.enabled && p.lobbyKey.empty()) {
+				if (!p.lookingForMatch) {
+					p.lookingForMatch = true;
+					p.lookingSinceMs = GetTickCount64();
+				}
+			}
+			else {
+				p.lookingForMatch = false;
+				p.lookingSinceMs = 0;
+			}
 		}
 		else if (type == SessionProtocol::MT_CHAT_SEND) {
 			SessionProtocol::ChatSend request;
@@ -716,6 +892,8 @@ int SessionServer::Step()
 		}
 	}
 
+	StepMatchmaking();
+
 	for (auto iter = registry.lobbies.begin(); iter != registry.lobbies.end(); iter++) {
 		Lobby& lobby = iter->second;
 		if (lobby.dirty) {
@@ -819,7 +997,84 @@ void SessionServer::SeatInLobby(HSteamNetConnection conn, Lobby& lobby) {
 	member.conn = conn;
 	lobby.members.push_back(member);
 	peer.lobbyKey = lobby.id.key;
+
+	// Taking a seat anywhere leaves the quickmatch queue and voids any
+	// outstanding challenge this peer sent.
+	peer.lookingForMatch = false;
+	peer.lookingSinceMs = 0;
+	peer.challengeTarget.clear();
+	peer.challengeSentAtMs = 0;
+
 	lobby.dirty = true;
+}
+
+Lobby* SessionServer::CreatePairLobby(const std::string& displayName, HSteamNetConnection a, HSteamNetConnection b) {
+	Lobby* lobby = registry.Create(
+		displayName,
+		matchEditionSelect,
+		matchRoundCount,
+		matchRoundTime,
+		2,
+		false,
+		true
+	);
+	SeatInLobby(a, *lobby);
+	SeatInLobby(b, *lobby);
+	spdlog::info(
+		"Server: paired \"{}\" and \"{}\" into unlisted lobby {}",
+		peers[a].data.name,
+		peers[b].data.name,
+		lobby->id.key
+	);
+	return lobby;
+}
+
+void SessionServer::RespondChallengeResult(HSteamNetConnection conn, const std::string& target, SessionProtocol::ChallengeResult result) {
+	SessionProtocol::ChallengeResultMsg resp;
+	resp.target = target;
+	resp.result = result;
+	json msg = resp;
+	Respond(conn, msg);
+}
+
+void SessionServer::StepMatchmaking() {
+	uint64_t now = GetTickCount64();
+
+	// Expire unanswered challenges.
+	for (auto iter = peers.begin(); iter != peers.end(); iter++) {
+		Peer& p = iter->second;
+		if (!p.challengeTarget.empty() && now - p.challengeSentAtMs > challengeTtlMs) {
+			RespondChallengeResult(iter->first, p.challengeTarget, SessionProtocol::CR_EXPIRED);
+			p.challengeTarget.clear();
+			p.challengeSentAtMs = 0;
+		}
+	}
+
+	// Pair queued lounge peers oldest-first.
+	std::vector<HSteamNetConnection> queue;
+	for (auto iter = peers.begin(); iter != peers.end(); iter++) {
+		if (iter->second.lookingForMatch && iter->second.lobbyKey.empty()) {
+			queue.push_back(iter->first);
+		}
+	}
+	std::sort(queue.begin(), queue.end(), [this](HSteamNetConnection lhs, HSteamNetConnection rhs) {
+		return peers[lhs].lookingSinceMs < peers[rhs].lookingSinceMs;
+	});
+	for (size_t i = 0; i + 1 < queue.size(); i += 2) {
+		HSteamNetConnection a = queue[i];
+		HSteamNetConnection b = queue[i + 1];
+		CreatePairLobby("Quick match", a, b);
+
+		SessionProtocol::MatchmakeEvent eventA;
+		eventA.opponent = peers[b].data.name;
+		json msgA = eventA;
+		Respond(a, msgA);
+
+		SessionProtocol::MatchmakeEvent eventB;
+		eventB.opponent = peers[a].data.name;
+		json msgB = eventB;
+		Respond(b, msgB);
+	}
 }
 
 void SessionServer::RemoveFromLobby(HSteamNetConnection conn) {
@@ -920,6 +1175,20 @@ void SessionServer::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusCh
 				pInfo->m_info.m_eEndReason,
 				pInfo->m_info.m_szEndDebug
 			);
+
+			// Anyone whose outstanding challenge targeted the leaver
+			// hears "offline" instead of waiting out the expiry.
+			auto leaverIter = peers.find(pInfo->m_hConn);
+			if (leaverIter != peers.end()) {
+				const std::string leaverName = leaverIter->second.data.name;
+				for (auto pIter = peers.begin(); pIter != peers.end(); pIter++) {
+					if (pIter->first != pInfo->m_hConn && pIter->second.challengeTarget == leaverName) {
+						RespondChallengeResult(pIter->first, leaverName, SessionProtocol::CR_OFFLINE);
+						pIter->second.challengeTarget.clear();
+						pIter->second.challengeSentAtMs = 0;
+					}
+				}
+			}
 
 			RemoveFromLobby(pInfo->m_hConn);
 			peers.erase(pInfo->m_hConn);

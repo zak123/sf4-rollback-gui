@@ -58,7 +58,8 @@ Lobby* LobbyRegistry::Create(
 	int roundCount,
 	Dimps::Math::FixedPoint roundTime,
 	size_t capacity,
-	bool persistent
+	bool persistent,
+	bool unlisted
 ) {
 	std::string key = std::to_string(_nextKey);
 	_nextKey++;
@@ -71,6 +72,7 @@ Lobby* LobbyRegistry::Create(
 	lobby.roundTime = roundTime;
 	lobby.capacity = capacity;
 	lobby.persistent = persistent;
+	lobby.unlisted = unlisted;
 	return &lobby;
 }
 

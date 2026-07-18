@@ -55,6 +55,9 @@ namespace sf4e {
 		void SeatInLobby(HSteamNetConnection conn, Lobby& lobby);
 		void RemoveFromLobby(HSteamNetConnection conn);
 		void HandleResults(Lobby& lobby, int loserSide);
+		Lobby* CreatePairLobby(const std::string& displayName, HSteamNetConnection a, HSteamNetConnection b);
+		void RespondChallengeResult(HSteamNetConnection conn, const std::string& target, SessionProtocol::ChallengeResult result);
+		void StepMatchmaking();
 
 	public:
 		// Hosts no lobbies at startup: every lobby is created by a
@@ -98,12 +101,32 @@ namespace sf4e {
 			// slot it would overwrite is younger than the rate window.
 			uint64_t chatStamps[5] = { 0 };
 			int chatStampIdx = 0;
+
+			// Quickmatch queue membership; lookingSinceMs orders the
+			// FIFO pairing.
+			bool lookingForMatch = false;
+			uint64_t lookingSinceMs = 0;
+
+			// This peer's outstanding outgoing challenge, if any.
+			std::string challengeTarget;
+			uint64_t challengeSentAtMs = 0;
 		} Peer;
 
 		// The most registered peers this server admits; zero means
 		// unlimited. Seat handoffs are exempt- their games pair with
 		// already-admitted peers.
 		size_t maxPeers = 0;
+
+		// Match settings applied to server-created (challenge and
+		// quickmatch) lobbies. The default-lobby constructor mirrors its
+		// settings here; Lobbyd sets them from its flags.
+		bool matchEditionSelect = true;
+		int matchRoundCount = 3;
+		Dimps::Math::FixedPoint matchRoundTime = { 0, 99 };
+
+		// How long an unanswered challenge lives. Public so tests can
+		// shrink it.
+		uint64_t challengeTtlMs = 30 * 1000;
 
 		// Public for visibility into tests only.
 		std::map<HSteamNetConnection, SessionProtocol::ConnectionID> cidMap;

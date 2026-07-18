@@ -303,6 +303,64 @@ int SessionClient::Step()
 				_callbacks.OnLobbyList(this, _callbacks);
 			}
 		}
+		else if (type == SessionProtocol::MT_PRESENCE_LIST_RESP) {
+			SessionProtocol::PresenceListResp resp;
+			try {
+				msg.get_to(resp);
+			}
+			catch (json::exception e) {
+				spdlog::info("Client: could not deserialize presence list");
+				continue;
+			}
+
+			_presence = resp.players;
+			_lookingCount = resp.lookingCount;
+			if (_callbacks.OnPresence) {
+				_callbacks.OnPresence(this, _callbacks);
+			}
+		}
+		else if (type == SessionProtocol::MT_CHALLENGE_EVENT) {
+			SessionProtocol::ChallengeEvent event;
+			try {
+				msg.get_to(event);
+			}
+			catch (json::exception e) {
+				spdlog::info("Client: could not deserialize challenge event");
+				continue;
+			}
+
+			if (_callbacks.OnChallengeEvent) {
+				_callbacks.OnChallengeEvent(event, this, _callbacks);
+			}
+		}
+		else if (type == SessionProtocol::MT_CHALLENGE_RESULT) {
+			SessionProtocol::ChallengeResultMsg result;
+			try {
+				msg.get_to(result);
+			}
+			catch (json::exception e) {
+				spdlog::info("Client: could not deserialize challenge result");
+				continue;
+			}
+
+			if (_callbacks.OnChallengeResult) {
+				_callbacks.OnChallengeResult(result, this, _callbacks);
+			}
+		}
+		else if (type == SessionProtocol::MT_MATCHMAKE_EVENT) {
+			SessionProtocol::MatchmakeEvent event;
+			try {
+				msg.get_to(event);
+			}
+			catch (json::exception e) {
+				spdlog::info("Client: could not deserialize matchmake event");
+				continue;
+			}
+
+			if (_callbacks.OnMatchmakeEvent) {
+				_callbacks.OnMatchmakeEvent(event, this, _callbacks);
+			}
+		}
 		else if (type == SessionProtocol::MT_MATCH_HANDOFF) {
 			SessionProtocol::MatchHandoff handoff;
 			try {
@@ -574,6 +632,54 @@ EResult SessionClient::Chat_Send(const std::string& channel, const std::string& 
 	EResult result = Send(j, nullptr);
 	if (result != k_EResultOK) {
 		spdlog::warn("Client: could not send chat! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Presence_RequestList()
+{
+	SessionProtocol::PresenceListRequest msg;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not request presence! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Challenge_Send(const std::string& target)
+{
+	SessionProtocol::ChallengeSend msg;
+	msg.target = target;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not send challenge! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Challenge_Answer(const std::string& from, bool accept)
+{
+	SessionProtocol::ChallengeAnswer msg;
+	msg.from = from;
+	msg.accept = accept;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not answer challenge! Result: {}", (int)result);
+	}
+	return result;
+}
+
+EResult SessionClient::Matchmake_Set(bool enabled)
+{
+	SessionProtocol::Matchmake msg;
+	msg.enabled = enabled;
+	json j = msg;
+	EResult result = Send(j, nullptr);
+	if (result != k_EResultOK) {
+		spdlog::warn("Client: could not set matchmake! Result: {}", (int)result);
 	}
 	return result;
 }
