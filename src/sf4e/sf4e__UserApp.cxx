@@ -15,6 +15,7 @@
 #include "../Dimps/Dimps__Math.hxx"
 #include "../Dimps/Dimps__Pad.hxx"
 #include "../Dimps/Dimps__UserApp.hxx"
+#include "../session/sf4e__Resolve.hxx"
 #include "../session/sf4e__SessionClient.hxx"
 #include "../session/sf4e__SessionProtocol.hxx"
 #include "../session/sf4e__SessionServer.hxx"
@@ -260,8 +261,9 @@ void fUserApp::StartSession(
     const char* handoffToken
 ) {
     SteamNetworkingIPAddr addr;
-    addr.Clear();
-    addr.ParseString(joinAddr);
+    if (!sf4e::Net::ResolveHostPort(joinAddr, addr)) {
+        spdlog::error("StartSession: could not resolve session server \"{}\"", joinAddr);
+    }
     netplay.reset(new Netplay(
         clientCallbacks,
         sidecarHash,

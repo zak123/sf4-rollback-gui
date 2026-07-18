@@ -16,6 +16,7 @@
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 
 #include "sf4e__LobbyRegistry.hxx"
+#include "sf4e__Resolve.hxx"
 #include "sf4e__SessionClient.hxx"
 #include "sf4e__SessionProtocol.hxx"
 #include "sf4e__SessionServer.hxx"
@@ -112,10 +113,9 @@ static TestClientCtx* MakeClient(
 	ctx->c->_autoJoinHandoff = autoJoinHandoff;
 
 	SteamNetworkingIPAddr addr;
-	addr.Clear();
-	char szAddr[32];
-	snprintf(szAddr, sizeof(szAddr), "127.0.0.1:%d", serverPort);
-	addr.ParseString(szAddr);
+	char szAddr[64];
+	snprintf(szAddr, sizeof(szAddr), "localhost:%d", serverPort);
+	sf4e::Net::ResolveHostPort(szAddr, addr);
 	ctx->c->Connect(addr);
 
 	// The IP-address Connect() enables battle snapshots, but snapshot
@@ -163,6 +163,23 @@ int main(int argc, char** argv) {
 	if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
 		spdlog::error("GameNetworkingSockets_Init failed: {}", errMsg);
 		return 1;
+	}
+
+	// Address resolution: literal IPs, resolvable hostnames, and the
+	// ways both can be malformed.
+	{
+		SteamNetworkingIPAddr addr;
+		CHECK(
+			sf4e::Net::ResolveHostPort("127.0.0.1:23450", addr) && addr.m_port == 23450,
+			"resolver passes literal ip:port through"
+		);
+		CHECK(
+			sf4e::Net::ResolveHostPort("localhost:23450", addr) &&
+			addr.m_port == 23450 && addr.GetIPv4() == 0x7f000001,
+			"resolver resolves hostnames to their IPv4 address"
+		);
+		CHECK(!sf4e::Net::ResolveHostPort("localhost", addr), "resolver rejects a missing port");
+		CHECK(!sf4e::Net::ResolveHostPort("definitely-not-a-real-host.invalid:23450", addr), "resolver rejects unresolvable hosts");
 	}
 
 	int ret = 1;

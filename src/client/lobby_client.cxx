@@ -35,6 +35,7 @@
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 
 #include "../Dimps/Dimps__Game__Battle.hxx"
+#include "../session/sf4e__Resolve.hxx"
 #include "../session/sf4e__SessionClient.hxx"
 #include "../session/sf4e__SessionProtocol.hxx"
 #include "sf4e__Roster.hxx"
@@ -242,9 +243,11 @@ static SessionClient::Callbacks kCallbacks = {
 
 static void ConnectToServer() {
 	SteamNetworkingIPAddr addr;
-	addr.Clear();
-	if (!addr.ParseString(g_app.szServerAddr)) {
-		g_app.alerts.push_back("Server address must look like ip:port");
+	if (!sf4e::Net::ResolveHostPort(g_app.szServerAddr, addr)) {
+		g_app.alerts.push_back(
+			"Could not find that server- the address should look like "
+			"play.example.com:23450 or 203.0.113.7:23450"
+		);
 		return;
 	}
 

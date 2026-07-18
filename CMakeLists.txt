@@ -105,6 +105,8 @@ target_link_libraries(
 add_library(Session STATIC
     "src/session/sf4e__LobbyRegistry.hxx"
     "src/session/sf4e__LobbyRegistry.cxx"
+    "src/session/sf4e__Resolve.hxx"
+    "src/session/sf4e__Resolve.cxx"
     "src/session/sf4e__SessionClient.hxx"
     "src/session/sf4e__SessionClient.cxx"
     "src/session/sf4e__SessionProtocol.hxx"
@@ -115,7 +117,7 @@ add_library(Session STATIC
 target_link_libraries(
     Session
     PRIVATE Dimps
-    PUBLIC nlohmann_json::nlohmann_json spdlog::spdlog GameNetworkingSockets::shared
+    PUBLIC nlohmann_json::nlohmann_json spdlog::spdlog GameNetworkingSockets::shared "ws2_32"
 )
 
 add_executable(Lobbyd "src/lobbyd/lobbyd.cxx")
