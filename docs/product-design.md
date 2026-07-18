@@ -241,7 +241,91 @@ games exit or idle, seats return to the apps, lobby resets to `WAITING`.
   already exists), spectators (blocked on upstream issue #10), accounts +
   rankings, UDP relay fallback for symmetric NATs, Linux `Lobbyd`.
 
-## 9. Open questions
+## 9. Presence, challenges, and quickmatch (researched 2026-07-18)
+
+Two requested features, designed but not yet built: a list of online
+players with click-to-challenge, and a "looking for match" toggle that
+pairs players automatically. Both are protocol + server + app work with
+**zero game-side changes** — the game only ever sees "I've been seated
+in a lobby and it went all-ready," exactly as today. (Prior art check:
+Confetti3's "Find match" is an HTTP room browser on their broker; they
+have no persistent client connections, so neither presence nor pairing
+exists there. Our always-connected apps make both cheap.)
+
+### Prerequisite: unlisted lobbies
+
+`Lobby` gains `bool unlisted`; `lobby_list` skips unlisted lobbies.
+Challenge and quickmatch lobbies are created unlisted so a third party
+can't grab a seat meant for a specific pair. Not exposed in the create
+UI for now.
+
+### Presence
+
+| Message | Direction | Payload |
+|---|---|---|
+| `presence_list` | C→S | *(empty)* |
+| `presence_list_resp` | S→C | `players: [{name, status}]`, `lookingCount` |
+
+Status is derived server-side, deduping the app/game connections that
+share a name: `in_match` if any same-name connection sits in a lobby
+whose match cycle is live, else `in_lobby` if seated, else `looking`
+if flagged for quickmatch, else `lounge`. The app polls on the same 2s
+tick as `lobby_list` and renders a Players tab beside the chat.
+
+### Private challenges
+
+| Message | Direction | Payload |
+|---|---|---|
+| `challenge_send` | C→S | `target` (name) |
+| `challenge_event` | S→C (target) | `from` |
+| `challenge_answer` | C→S | `from`, `accept` |
+| `challenge_result` | S→C (challenger) | `target`, `result: accepted/declined/expired/busy/offline` |
+
+Rules: both sides must be idle in the lounge; one outstanding
+challenge per sender; 30s expiry; disconnects resolve as `offline`;
+simultaneous cross-challenges resolve first-processed-wins, the other
+gets `busy`. On accept the server creates an unlisted lobby with the
+server-default match settings and **seats both connections** — the
+apps' existing lobby-panel behavior takes over from there, and the
+normal pick/ready/handoff flow runs unchanged.
+
+UI: clicking a player in the Players tab offers Challenge (enabled
+only when both are in the lounge); an incoming challenge renders as an
+actionable banner with Accept/Decline.
+
+### Quickmatch ("looking for match")
+
+| Message | Direction | Payload |
+|---|---|---|
+| `matchmake` | C→S | `enabled` |
+| `matchmake_event` | S→C (both) | `opponent` |
+
+The server keeps a FIFO queue (flag + timestamp on the peer; lounge
+peers only). After each message-processing step, while two or more
+queued peers exist, it pairs the two oldest into an unlisted "Quick
+match" lobby with server-default settings, clears their flags, and
+emits `matchmake_event` so the apps can toast "Matched with X." Players
+still pick characters and ready up — quickmatch removes *finding* an
+opponent, not confirming the fight. Toggling off, joining anything
+else, accepting a challenge, or disconnecting leaves the queue.
+
+### Coverage and effort
+
+All of it is exercisable by the headless smoke test (presence statuses,
+challenge accept/decline/expiry/busy, unlisted exclusion from listings,
+FIFO pairing, queue-clearing interactions). Estimated effort: presence
+~half a day, challenges ~a day, quickmatch ~half a day.
+
+### Open decisions
+
+1. Challenge/quickmatch lobby settings: server defaults (proposed) or
+   challenger's saved preferences once the app has config persistence?
+2. Should quickmatch eventually auto-ready with remembered characters?
+   (Proposed: later, after the app persists a main.)
+3. Players list placement: tab in the chat pane (proposed) vs. an
+   always-visible third column.
+
+## 10. Open questions
 
 1. **Branding/naming** — `Lobbyd`/`LobbyClient` are working names; product
    name TBD before public alpha.
