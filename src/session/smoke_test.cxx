@@ -88,7 +88,9 @@ static TestClientCtx* MakeClient(
 	const std::string& name,
 	uint16_t ggpoPort,
 	const SessionProtocol::LobbyID& autoJoinLobby = SessionProtocol::LobbyID{ "", "" },
-	const std::string& autoJoinHandoff = std::string()
+	const std::string& autoJoinHandoff = std::string(),
+	const std::string& sidecarHash = std::string("smokehash"),
+	uint16_t serverPort = TEST_PORT
 ) {
 	TestClientCtx* ctx = new TestClientCtx();
 	ctx->name = name;
@@ -104,14 +106,15 @@ static TestClientCtx* MakeClient(
 		OnMatchHandoff,
 	};
 	std::string mutableName = name;
-	ctx->c.reset(new SessionClient(callbacks, std::string("smokehash"), ggpoPort, mutableName));
+	std::string mutableHash = sidecarHash;
+	ctx->c.reset(new SessionClient(callbacks, mutableHash, ggpoPort, mutableName));
 	ctx->c->_autoJoinLobby = autoJoinLobby;
 	ctx->c->_autoJoinHandoff = autoJoinHandoff;
 
 	SteamNetworkingIPAddr addr;
 	addr.Clear();
 	char szAddr[32];
-	snprintf(szAddr, sizeof(szAddr), "127.0.0.1:%d", TEST_PORT);
+	snprintf(szAddr, sizeof(szAddr), "127.0.0.1:%d", serverPort);
 	addr.ParseString(szAddr);
 	ctx->c->Connect(addr);
 
@@ -512,6 +515,59 @@ int main(int argc, char** argv) {
 			delete *iter;
 		}
 		g_clients.clear();
+	}
+
+	// Scenario 2: a hash-pinned server. The pin keeps mismatched game
+	// builds (which would desync) out, but gameless app connections
+	// carry no sidecar hash and must still be admitted.
+	if (ret == 0) {
+		const uint16_t PINNED_PORT = TEST_PORT + 1;
+		SessionServer pinned(std::string("smokehost"), std::string("pinnedhash"));
+		if (pinned.Listen(PINNED_PORT) != 0) {
+			spdlog::error("FAIL: could not listen on {}", PINNED_PORT);
+			ret = 1;
+		}
+		else {
+			ret = [&pinned, PINNED_PORT]() -> int {
+				SessionProtocol::LobbyID noLobby = { "", "" };
+
+				TestClientCtx* app = MakeClient("app", 25001, noLobby, std::string(), std::string(""), PINNED_PORT);
+				g_clients.push_back(app);
+				CHECK(
+					PumpUntil(pinned, 5000, [&]() { return pinned.peers.size() == 1; }),
+					"a pinned server admits gameless app connections"
+				);
+
+				TestClientCtx* wrongGame = MakeClient("wrong", 25002, noLobby, std::string(), std::string("otherhash"), PINNED_PORT);
+				g_clients.push_back(wrongGame);
+				CHECK(
+					PumpUntil(pinned, 5000, [&]() {
+						return wrongGame->errored &&
+							wrongGame->lastError == SessionClient::SCE_JOIN_REJECTED_HASH_INVALID;
+					}),
+					"a pinned server rejects mismatched game builds"
+				);
+
+				TestClientCtx* rightGame = MakeClient("right", 25003, noLobby, std::string(), std::string("pinnedhash"), PINNED_PORT);
+				g_clients.push_back(rightGame);
+				CHECK(
+					PumpUntil(pinned, 5000, [&]() { return pinned.peers.size() == 2; }),
+					"a pinned server admits the matching game build"
+				);
+
+				return 0;
+			}();
+
+			for (auto iter = g_clients.begin(); iter != g_clients.end(); iter++) {
+				(*iter)->c->Disconnect();
+			}
+			pinned.Step();
+			pinned.Close();
+			for (auto iter = g_clients.begin(); iter != g_clients.end(); iter++) {
+				delete *iter;
+			}
+			g_clients.clear();
+		}
 	}
 
 	GameNetworkingSockets_Kill();

@@ -38,10 +38,12 @@ means in practice).
    - `identity.txt` is the address testers connect to; it's the routing
      name baked into connection and lobby IDs, and it survives updates.
    - The bundled `sidecar-hash.txt` makes the wrapper pin the exact
-     build testers must run, so mismatched builds (which would desync)
-     are rejected up front. Every client bundle from the same CI run
-     carries the matching `Sidecar.dll`. Delete the file to accept any
-     build- fine for small trusted groups, not for open tests.
+     game build testers must run, so mismatched builds (which would
+     desync) are rejected up front. Every client bundle from the same
+     CI run carries the matching `Sidecar.dll`. The pin only applies to
+     game connections- the lobby app carries no sidecar and is always
+     admitted. Delete the file to accept any game build- fine for small
+     trusted groups, not for open tests.
    - While the repo is **private**, also give the self-updater a token:
      create a fine-grained PAT (this repo only, Contents: read-only) and
      `Set-Content C:\sf4e-lobbyd\github-token.txt "<PAT>" -NoNewline`.

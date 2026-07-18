@@ -296,11 +296,17 @@ int SessionServer::Step()
 					continue;
 				}
 
-				// An empty expected hash means "accept any build". Dedicated
-				// dev servers use this before a release hash is pinned, and
-				// connections that don't run the game (ex. lobby browsers)
-				// have no sidecar at all.
-				if (!_sidecarHash.empty() && request.sidecarHash != _sidecarHash) {
+				// The hash gate exists to keep mismatched game builds-
+				// which would desync- out of matches. Connections that
+				// don't run the game (the lobby app, browsers) carry no
+				// sidecar and send an empty hash: admit them regardless
+				// of the pin. Game builds always send their real hash,
+				// and seats are still strictly gated at handoff.
+				if (
+					!_sidecarHash.empty() &&
+					!request.sidecarHash.empty() &&
+					request.sidecarHash != _sidecarHash
+				) {
 					spdlog::info("Server: rejecting registration for bad sidecar hash");
 					RespondJoinReject(conn, SessionProtocol::JR_HASH_INVALID);
 					continue;
