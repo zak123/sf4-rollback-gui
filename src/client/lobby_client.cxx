@@ -636,6 +636,7 @@ static void SetUpLogging(bool bShowConsole) {
 
 	std::shared_ptr<spdlog::logger> logger(new spdlog::logger("LobbyClient", sinks.begin(), sinks.end()));
 	spdlog::set_default_logger(logger);
+	spdlog::flush_on(spdlog::level::info);
 	spdlog::info("Welcome to the sf4e lobby client");
 }
 

@@ -149,6 +149,9 @@ int fMain::Initialize(void* a, void* b, void* c) {
             }
             std::shared_ptr<spdlog::logger> logger(new spdlog::logger("sf4e", sinks.begin(), sinks.end()));
             spdlog::set_default_logger(logger);
+            // Flush per message- a modded game crashes often enough
+            // that buffered log tails are exactly the lines you need.
+            spdlog::flush_on(spdlog::level::info);
             spdlog::info("Welcome to sf4e");
         }
         catch (const spdlog::spdlog_ex& ex)

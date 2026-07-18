@@ -71,6 +71,11 @@ int fSystem::nNextBattleStartFlowTarget = -1;
 int fSystem::nRandomizeLocalInputsEveryXFramesInGGPO = 0;
 uint64_t fSystem::nGgpoWaitStartMs = 0;
 bool fSystem::bGgpoEverRan = false;
+bool fSystem::bGgpoConnectionInterrupted = false;
+
+// What bUpdateAllowed held before a connection interruption paused the
+// simulation, restored when the connection resumes.
+static bool s_bUpdateAllowedBeforeInterrupt = true;
 
 // How long GGPO gets to complete its initial peer synchronization
 // before the match is abandoned- the peer may be unreachable, ex.
@@ -317,7 +322,7 @@ void fSystem::BattleUpdate() {
                 fPadSystem::playbackFrame = -1;
                 GGPOErrorCode err = ggpo_advance_frame(ggpo);
                 if (!GGPO_SUCCEEDED(err)) {
-                    MessageBoxA(NULL, "sf4e system could not advance frame after normal sim! Will likely crash!", NULL, MB_OK);
+                    AbortGgpoMatch("GGPO could not advance the frame after normal simulation");
                 }
                 else {
                     if (fSoundPlayerManager::bUsePureSounds) {
@@ -358,6 +363,7 @@ void fSystem::CloseBattle() {
     }
     nGgpoWaitStartMs = 0;
     bGgpoEverRan = false;
+    bGgpoConnectionInterrupted = false;
     for (int i = 0; i < NUM_SAVE_STATES; i++) {
         if (saveStates[i].used) {
             SaveState::Free(&saveStates[i]);
@@ -517,6 +523,20 @@ void fSystem::RecordAllToInternalMementos(rSystem* system, GameMementoKey::Memen
 }
 
 
+void fSystem::AbortGgpoMatch(const char* szReason) {
+    // Adapted from Confetti3's SF4-Netplay-Launcher (MIT): failures
+    // mid-match used to pop a "will likely crash" message box and then
+    // usually did. Ending the battle through the game's own leaving
+    // flow keeps the process alive- the battle exits, battle_ended
+    // resets the lobby cycle, and the players can rematch.
+    spdlog::error("GGPO match aborted: {}", szReason);
+    bUpdateAllowed = false;
+    rSystem* system = rSystem::staticMethods.GetSingleton();
+    if (system) {
+        *rSystem::GetReadyState(system) = rSystem::RS_ISLEAVING;
+    }
+}
+
 void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int frameDelay, DWORD rngSeed) {
     GGPOSessionCallbacks cb = { 0 };
     cb.begin_game = ggpo_begin_game_callback;
@@ -539,8 +559,11 @@ void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int fra
         spdlog::error("GGPO session could not start: {}", (int)result);
         MessageBoxA(NULL, "GGPO could not start, check logs", NULL, MB_OK);
     }
-    ggpo_set_disconnect_timeout(ggpo, 1000);
-    ggpo_set_disconnect_notify_start(ggpo, 500);
+    // Upstream's 1000/500 proved too aggressive for WAN play- transient
+    // hiccups became disconnects. These values are field-tested in
+    // Confetti3's SF4-Netplay-Launcher.
+    ggpo_set_disconnect_timeout(ggpo, 3000);
+    ggpo_set_disconnect_notify_start(ggpo, 1500);
 
     int localPlayerIdx = -1;
     for (int i = 0; i < 2; i++) {
@@ -574,6 +597,7 @@ void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int fra
     bUpdateAllowed = false;
     nGgpoWaitStartMs = 0;
     bGgpoEverRan = false;
+    bGgpoConnectionInterrupted = false;
     fVsBattle::bTerminateOnNextLeftBattle = true;
     fVsBattle::bOverrideNextRandomSeed = true;
     fVsBattle::nextMatchRandomSeed = rngSeed;
@@ -609,6 +633,7 @@ void fSystem::StartSpectating(unsigned short localport, int num_players, char* h
     bUpdateAllowed = false;
     nGgpoWaitStartMs = 0;
     bGgpoEverRan = false;
+    bGgpoConnectionInterrupted = false;
     fVsBattle::bTerminateOnNextLeftBattle = true;
     fVsBattle::bOverrideNextRandomSeed = true;
     fVsBattle::nextMatchRandomSeed = rngSeed;
@@ -628,7 +653,7 @@ bool fSystem::ggpo_advance_frame_callback(int)
     // the game state instead of reading from the selected input device.
     GGPOErrorCode result = ggpo_synchronize_input(ggpo, (void*)inputs, sizeof(fPadSystem::Inputs) * 2, &disconnect_flags);
     if (!GGPO_SUCCEEDED(result)) {
-        MessageBoxA(NULL, "sf4e system could not sync input during forward-sim! Will likely crash!", NULL, MB_OK);
+        AbortGgpoMatch("GGPO could not synchronize input during forward simulation");
     }
     fPadSystem::playbackFrame = 0;
     fPadSystem::playbackData[0][0] = inputs[0];
@@ -643,7 +668,7 @@ bool fSystem::ggpo_advance_frame_callback(int)
 
     result = ggpo_advance_frame(ggpo);
     if (!GGPO_SUCCEEDED(result)) {
-        MessageBoxA(NULL, "sf4e system could not advance frame after callback! Will likely crash!", NULL, MB_OK);
+        AbortGgpoMatch("GGPO could not advance the frame after a rollback callback");
     }
     else {
         CaptureSnapshot(system);
@@ -724,10 +749,22 @@ bool fSystem::ggpo_on_event_callback(GGPOEvent* info) {
         spdlog::info("GGPO: Running");
         break;
     case GGPO_EVENTCODE_CONNECTION_INTERRUPTED:
+        // Hold the simulation while the peer is unreachable so this
+        // side doesn't run ahead during a transient outage. (Adapted
+        // from Confetti3's SF4-Netplay-Launcher.)
         spdlog::info("GGPO: GGPO_EVENTCODE_CONNECTION_INTERRUPTED");
+        if (!bGgpoConnectionInterrupted) {
+            bGgpoConnectionInterrupted = true;
+            s_bUpdateAllowedBeforeInterrupt = bUpdateAllowed;
+            bUpdateAllowed = false;
+        }
         break;
     case GGPO_EVENTCODE_CONNECTION_RESUMED:
         spdlog::info("GGPO: GGPO_EVENTCODE_CONNECTION_RESUMED");
+        if (bGgpoConnectionInterrupted) {
+            bGgpoConnectionInterrupted = false;
+            bUpdateAllowed = s_bUpdateAllowedBeforeInterrupt;
+        }
         break;
     case GGPO_EVENTCODE_DISCONNECTED_FROM_PEER:
         *rSystem::GetReadyState(system) = rSystem::RS_ISLEAVING;

@@ -59,6 +59,16 @@ namespace sf4e {
 				static uint64_t nGgpoWaitStartMs;
 				static bool bGgpoEverRan;
 
+				// Whether GGPO has reported the peer connection
+				// interrupted; simulation is held while true so one side
+				// doesn't run ahead during a transient outage.
+				static bool bGgpoConnectionInterrupted;
+
+				// Cleanly end a netplay match that can no longer
+				// continue: halt simulation and push the battle into the
+				// game's own leaving flow, instead of crashing.
+				static void AbortGgpoMatch(const char* szReason);
+
 				static bool extendedLoadRequest;
 				static bool extendedSaveRequest;
 				static Dimps::Game::GameMementoKey::MementoID mementoLoadRequest;
