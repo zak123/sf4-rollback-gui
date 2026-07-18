@@ -55,9 +55,10 @@ You need:
 
 Steps:
 
-1. Get the **client bundle** (`sf4e-client.zip`) from whoever invited
-   you, and extract **all** of it into one folder — the DLLs must stay
-   next to the exes.
+1. Download the **client bundle** (`sf4-rollback-gui-client.zip`) from
+   the [latest release](https://github.com/zak123/sf4-rollback-gui/releases/latest),
+   and extract **all** of it into one folder — the DLLs must stay next
+   to the exes.
 2. Run `LobbyClient.exe`. Pick a name, enter the playtest server
    address you were given (currently `44.226.168.62:23450` — this can
    change between playtests), and connect.

@@ -7,3 +7,4 @@
 /.claude
 /vcpkg_installed
 /dist
+imgui.ini
