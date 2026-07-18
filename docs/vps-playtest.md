@@ -28,29 +28,47 @@ means in practice).
 
    Also allow UDP 23450 in the provider's own firewall/security-group
    settings if it has one (Azure NSG, Vultr firewall, etc.).
-3. Run it:
+3. Create the config files the bundle's launch wrapper reads (in
+   `C:\sf4e-lobbyd`):
 
-   ```
-   Lobbyd.exe --port 23450 --no-default-lobby --identity <public-ip>:23450 --sidecar-hash <contents of sidecar-hash.txt>
-   ```
-
-   - `--identity` should be the address testers connect to; it's the
-     routing name baked into connection and lobby IDs.
-   - `--sidecar-hash` pins the exact build testers must run, so
-     mismatched builds (which would desync) are rejected up front. Every
-     client bundle from the same CI run carries the matching
-     `Sidecar.dll`. **Leave it off while iterating quickly** and any
-     build can connect- fine for small trusted groups, not for open
-     tests.
-   - `--max-peers` caps admissions (default 64).
-4. Keep it running across reboots with a scheduled task (admin prompt):
-
-   ```
-   schtasks /create /tn sf4e-lobbyd /sc onstart /ru SYSTEM /tr "C:\sf4e-lobbyd\Lobbyd.exe --port 23450 --no-default-lobby --identity <public-ip>:23450 --sidecar-hash <hash>"
+   ```powershell
+   Set-Content C:\sf4e-lobbyd\identity.txt "<public-ip>:23450" -NoNewline -Encoding ascii
    ```
 
-   (Or use [NSSM](https://nssm.cc/) to run it as a real service with
-   restart-on-crash.)
+   - `identity.txt` is the address testers connect to; it's the routing
+     name baked into connection and lobby IDs, and it survives updates.
+   - The bundled `sidecar-hash.txt` makes the wrapper pin the exact
+     build testers must run, so mismatched builds (which would desync)
+     are rejected up front. Every client bundle from the same CI run
+     carries the matching `Sidecar.dll`. Delete the file to accept any
+     build- fine for small trusted groups, not for open tests.
+   - While the repo is **private**, also give the self-updater a token:
+     create a fine-grained PAT (this repo only, Contents: read-only) and
+     `Set-Content C:\sf4e-lobbyd\github-token.txt "<PAT>" -NoNewline`.
+     Delete the file once the repo is public.
+4. Register the server and the self-updater as scheduled tasks (admin
+   prompt), and start the server:
+
+   ```
+   schtasks /create /tn sf4e-lobbyd /sc onstart /ru SYSTEM /tr "C:\sf4e-lobbyd\run-lobbyd.bat"
+   schtasks /create /tn sf4e-updater /sc minute /mo 10 /ru SYSTEM /tr "powershell -ExecutionPolicy Bypass -File C:\sf4e-lobbyd\vps-update.ps1"
+   schtasks /run /tn sf4e-lobbyd
+   ```
+
+   The updater checks the repo's **latest GitHub release** every 10
+   minutes; when a new one appears it downloads the server bundle,
+   stops the server, swaps the files (including the hash pin, the
+   wrapper, and itself), and restarts. Deploying is therefore just:
+
+   ```
+   git tag v0.1.1
+   git push origin v0.1.1
+   ```
+
+   CI builds the tag, attaches the bundles to a release, and the VPS
+   picks it up on its next check. Remember testers must grab the
+   matching client zip from the same release- the fresh hash pin locks
+   older builds out (that's the point).
 
 ## What playtesters do
 

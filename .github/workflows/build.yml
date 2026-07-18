@@ -83,8 +83,12 @@ jobs:
             "msvcp140.dll",
             "vcruntime140.dll"
           )
+          # The server bundle carries its own launch wrapper and
+          # self-updater so a deployed box stays current on its own.
+          Copy-Item scripts/run-lobbyd.bat, scripts/vps-update.ps1 $bd -Force
+
           $client = @("Launcher.exe", "Sidecar.dll", "LobbyClient.exe", "GGPO.dll") + $runtime + @("sidecar-hash.txt")
-          $server = @("Lobbyd.exe") + $runtime + @("sidecar-hash.txt")
+          $server = @("Lobbyd.exe", "run-lobbyd.bat", "vps-update.ps1") + $runtime + @("sidecar-hash.txt")
 
           New-Item -ItemType Directory dist | Out-Null
           Compress-Archive -Path ($client | ForEach-Object { Join-Path $bd $_ }) -DestinationPath dist/sf4-rollback-gui-client.zip
