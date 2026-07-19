@@ -325,7 +325,36 @@ FIFO pairing, queue-clearing interactions). Estimated effort: presence
 3. Players list placement: tab in the chat pane (proposed) vs. an
    always-visible third column.
 
-## 10. Open questions
+## 10. NAT traversal plan (researched 2026-07-19)
+
+Lobbyd already *is* the signaling server — both players hold
+connections to it and it can relay coordination messages. Three
+mechanics ride on top, adapted from Confetti3's MIT-licensed
+implementation (`NatProbe`, `TryCoordinatedP2pPunch`,
+`ggpo_udp_relay`) onto our session channel:
+
+1. **Endpoint discovery (STUN-alike).** A tiny UDP echo service beside
+   Lobbyd; each game probes it *from its GGPO socket* pre-match and
+   reports its true public `ip:port` through the session, replacing
+   today's session-IP + self-reported-local-port guess.
+2. **Coordinated punch.** New `punch_ready`/`punch_go` messages relayed
+   between the seated game connections; both sides fire packets at each
+   other's public *and private* endpoints simultaneously from the GGPO
+   port (private fixes the same-router hairpin case), then GGPO starts
+   on that port and inherits the opened mappings. Succeeds on
+   cone/port-restricted NATs — most home routers.
+3. **UDP relay fallback (TURN-alike).** For symmetric NAT/CGNAT pairs:
+   the server pairs two flows under a token and forwards datagrams;
+   GGPO is pointed at the relay instead of the peer. ~10–15 KB/s per
+   player, negligible on the VPS. A ~3s punch-verification exchange
+   before GGPO starts picks direct vs. relay invisibly.
+
+Sequencing: ship 1+2 first (1–2 days; probe and coordination are
+smoke-testable, real-NAT success needs the playtest), measure the
+connect rate, then decide the relay's urgency (another 1–2 days).
+Nothing touches the rollback core — GGPO just gets better addresses.
+
+## 11. Open questions
 
 1. **Branding/naming** — `Lobbyd`/`LobbyClient` are working names; product
    name TBD before public alpha.
