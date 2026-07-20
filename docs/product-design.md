@@ -354,7 +354,94 @@ smoke-testable, real-NAT success needs the playtest), measure the
 connect rate, then decide the relay's urgency (another 1–2 days).
 Nothing touches the rollback core — GGPO just gets better addresses.
 
-## 11. Open questions
+## 11. In-process rematch loop (researched 2026-07-20)
+
+**Problem.** After every match the game force-terminates its event tree
+(`fVsBattle::bTerminateOnNextLeftBattle`, set by `StartGGPO`), dumping the
+player at the title screen. The only rematch path is: quit the game by
+hand, get re-seated in the app, re-ready, relaunch, and sit through the
+full boot (logos → title → menu → auto-join) — a minute-plus round trip
+per rematch. Goal: after a match ends, start the next one automatically,
+in the same game process, until a player quits.
+
+**What already exists (verified by reading, playtest-proven):**
+
+- Server: `battle_ended` (sent by both games from the `ExitForeground`
+  detour, idempotent) resets ready + loaded flags and handoff tokens,
+  keeps chara/stage as rematch defaults, and marks the lobby dirty so a
+  data-update broadcast follows. `lobby_ready` from both seats re-fires
+  ALLREADY — broadcast to the seat holders, which after handoff are the
+  games themselves. No protocol changes needed.
+- Game: `OnReady` (ALLREADY handler) already drives the entire path into
+  a battle: sets NBT_PVP + lobby settings, `bSkipToVersus` (VsPreBattle
+  replaces the next event with `VersusFromChr`, skipping chara/stage
+  select), injects chara/stage from `_matchData` into VsMode, navigates
+  `GoToVersusMode()`, and `StartGGPO` runs with `_matchData.rngSeed`.
+- Multi-battle processes are an upstream-supported shape (issue #9 was a
+  between-games leak; our fix clears snapshots in `CloseBattle` /
+  `ExitForeground`, which also reset the loaded/synced barrier and GGPO
+  interrupted-pause state each battle).
+- Hold primitives exist: `bBlockTermination` (delays VsBattle teardown
+  via the `IsTerminationComplete` override) and
+  `EventController::ReplaceNextEvent` (how `VersusFromChr` is entered).
+
+**Design (recommended): hold-and-replace, no menu travel.**
+
+1. `StartGGPO` stops setting `bTerminateOnNextLeftBattle` for lobby
+   matches. On battle end, `ExitForeground` (already sends
+   `battle_ended`) sets `bBlockTermination = true` and marks a
+   rematch-pending state: the game holds quietly at end-of-battle
+   instead of unwinding to the title screen.
+2. A per-frame tick (in `UserApp::Steam_PostUpdate`, where the client is
+   already pumped) sends `Lobby_Ready()` once while holding. The overlay
+   draws "Waiting for rematch — close the game to leave."
+3. When ALLREADY arrives: re-apply chara/stage/settings from the fresh
+   `_matchData` (same injection helpers), re-arm the per-battle one-shots
+   (`bForceNextMatchOnline`, seed override, `OnTasksRegistered` →
+   `StartGGPO`), call `ReplaceNextEvent("VersusFromChr")`, then release
+   `bBlockTermination`. The internal VS-mode flow rolls straight into the
+   next battle: results → loading → fight, no menus.
+4. Loop exit = the existing machinery. Player closes the game → process
+   exit → app re-seats them (M3 recovery, unchanged) → server frees the
+   seat → survivor's data-update shows the lobby down a member → its hold
+   aborts via `AbortNetplay` (auto-dismissing notice) back to the app.
+   Backstop: a rematch-wait watchdog (~60s, same pattern as the
+   loaded/sync timeout) for the server-vanished case.
+5. Server: one real change — re-roll `match.rngSeed` in the
+   `battle_ended` reset. Today the seed is set once by P1's app at
+   ready time (`PreBattle_SetEnv(localRand())`), so a loop without the
+   app would replay the same seed every match. The dirty-flush
+   data-update reaches both games before the next ALLREADY (Step
+   ordering already guarantees it). Rematch-time handoff tokens are
+   reissued to the game conns, which have no handoff callback — no-op.
+
+Nice property: aborted matches (desync, GGPO error) also send
+`battle_ended` and land in the same hold, so a transient failure
+auto-retries the match; the watchdog and member-count check bound it.
+
+**Alternative considered (menu roundtrip):** land on MainMenu post-match
+and let the unmodified `OnReady` re-drive from there. Rejected as
+primary: the current terminal-state lands on Title (observed in
+playtest), advancing Title→MainMenu programmatically needs new RE, and
+`OnReady` drops ALLREADY when not on MainMenu, so ready-timing gets
+racy. Hold-and-replace uses only already-RE'd primitives.
+
+**Verify before/while building** (needs the game, not smoke-testable):
+where the hold visually parks (expected: post-results fade); that
+`ReplaceNextEvent` works at battle-exit time, not just from
+VsPreBattle's `RegisterTasks`; a 3+ match soak for between-games state
+leaks (issue-#9 class: ColorFade list growth is a known-benign log);
+that both sides' `battle_ended`-then-`lobby_ready` sequence can't race
+the reset (server processes per-message in order, so ready-after-ended
+per connection is guaranteed, but B's ready may precede A's ended —
+readyMessageNum is then wiped by A's reset; the tick must therefore
+re-send ready if a data-update shows our seat un-readied while holding).
+
+Scope notes: 1v1 seats only (spectators keep the relaunch path);
+same-characters rematch v1 (re-pick between games = quit to app and
+re-challenge; an in-hold re-pick via the overlay panel is a natural v2).
+
+## 12. Open questions
 
 1. **Branding/naming** — `Lobbyd`/`LobbyClient` are working names; product
    name TBD before public alpha.
