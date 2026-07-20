@@ -72,6 +72,10 @@ if (-not (Test-Path (Join-Path $tmpDir "Lobbyd.exe"))) {
 schtasks /end /tn $taskName 2>$null | Out-Null
 Stop-Process -Name Lobbyd -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
+# A supervisor loop started outside the scheduled task (e.g. by hand)
+# survives the /end above and respawns Lobbyd within seconds; catch a
+# respawn right before the swap so the copy doesn't hit a locked exe.
+Stop-Process -Name Lobbyd -Force -ErrorAction SilentlyContinue
 
 try {
 	Copy-Item (Join-Path $tmpDir "*") $dir -Force

@@ -260,6 +260,20 @@ void fSystem::BattleUpdate() {
     static fPadSystem::Inputs randomInputs = { 0, 0 };
 
     if (!bUpdateAllowed) {
+        // If the battle wants to leave (peer disconnected, match
+        // aborted), run the native update GGPO-free so the leaving flow
+        // can process. Returning here instead would freeze the game on
+        // its final frame forever: the pause taken at
+        // CONNECTION_INTERRUPTED is only undone by a RESUMED event,
+        // which a peer that already exited will never send.
+        if (*rSystem::GetReadyState(_this) == rSystem::RS_ISLEAVING) {
+            if (fSoundPlayerManager::bUsePureSounds) {
+                fSoundPlayerManager::SyncState();
+            }
+            (_this->*sysMethods.BattleUpdate)();
+            return;
+        }
+
         // A GGPO session that has never reached its running state is
         // still in the initial peer handshake; give up if it takes
         // implausibly long.
@@ -767,6 +781,11 @@ bool fSystem::ggpo_on_event_callback(GGPOEvent* info) {
         }
         break;
     case GGPO_EVENTCODE_DISCONNECTED_FROM_PEER:
+        // The peer is gone for good; any interrupted-pause can never be
+        // resumed now. Clear it and leave- BattleUpdate drives the
+        // leaving flow GGPO-free while updates are paused.
+        spdlog::info("GGPO: GGPO_EVENTCODE_DISCONNECTED_FROM_PEER");
+        bGgpoConnectionInterrupted = false;
         *rSystem::GetReadyState(system) = rSystem::RS_ISLEAVING;
         break;
     case GGPO_EVENTCODE_TIMESYNC:
