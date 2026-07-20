@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include <windows.h>
+#include <mmsystem.h>
 #include <d3d9.h>
 #include <KnownFolders.h>
 #include <shellapi.h>
@@ -307,9 +308,24 @@ static void OnMatchHandoff(const SessionProtocol::MatchHandoff& handoff, Session
 	}
 }
 
+// Ring the bundled notification sound (notify.wav beside the exe) when
+// something needs the player's attention. A missing file is silence,
+// never a fallback beep.
+static void PlayNotifySound() {
+	static wchar_t szWav[MAX_PATH] = { 0 };
+	if (!szWav[0]) {
+		wchar_t szDir[MAX_PATH] = { 0 };
+		GetModuleFileNameW(NULL, szDir, MAX_PATH);
+		PathRemoveFileSpecW(szDir);
+		PathCombineW(szWav, szDir, L"notify.wav");
+	}
+	PlaySoundW(szWav, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+}
+
 static void OnChallengeEvent(const SessionProtocol::ChallengeEvent& event, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
 	strncpy_s(g_app.szChallengeFrom, event.from.c_str(), _TRUNCATE);
 	g_app.challengeReceivedAt = GetTickCount64();
+	PlayNotifySound();
 }
 
 static void OnChallengeResult(const SessionProtocol::ChallengeResultMsg& result, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
@@ -336,6 +352,7 @@ static void OnChallengeResult(const SessionProtocol::ChallengeResultMsg& result,
 static void OnMatchmakeEvent(const SessionProtocol::MatchmakeEvent& event, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
 	g_app.alerts.push_back("Matched with " + event.opponent + "!");
 	g_app.bLooking = false;
+	PlayNotifySound();
 }
 
 static SessionClient::Callbacks kCallbacks = {

@@ -91,7 +91,7 @@ jobs:
           # self-updater so a deployed box stays current on its own.
           Copy-Item scripts/run-lobbyd.bat, scripts/vps-update.ps1 $bd -Force
 
-          $client = @("Launcher.exe", "Sidecar.dll", "LobbyClient.exe", "GGPO.dll") + $runtime + @("sidecar-hash.txt")
+          $client = @("Launcher.exe", "Sidecar.dll", "LobbyClient.exe", "GGPO.dll", "notify.wav") + $runtime + @("sidecar-hash.txt")
           $server = @("Lobbyd.exe", "run-lobbyd.bat", "vps-update.ps1") + $runtime + @("sidecar-hash.txt")
 
           New-Item -ItemType Directory dist | Out-Null

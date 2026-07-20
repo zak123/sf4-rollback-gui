@@ -130,8 +130,14 @@ add_executable(LobbyClient WIN32
     "src/client/lobby_client.cxx"
     "src/client/sf4e__Roster.hxx"
 )
-target_link_libraries(LobbyClient PRIVATE nlohmann_json::nlohmann_json CLI11::CLI11 imgui::imgui spdlog::spdlog Dimps sf4e Session "d3d9" "shlwapi")
+target_link_libraries(LobbyClient PRIVATE nlohmann_json::nlohmann_json CLI11::CLI11 imgui::imgui spdlog::spdlog Dimps sf4e Session "d3d9" "shlwapi" "winmm")
 target_compile_definitions(LobbyClient PRIVATE -D_UNICODE -DUNICODE)
+# The challenge/matchmake notification sound ships beside the exe.
+add_custom_command(TARGET LobbyClient POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/src/client/notify.wav"
+        "$<TARGET_FILE_DIR:LobbyClient>/notify.wav"
+)
 
 add_executable(SessionInteractiveTest "src/session/interactive_test.cxx")
 target_link_libraries(SessionInteractiveTest PRIVATE nlohmann_json::nlohmann_json imgui::imgui spdlog::spdlog Dimps sf4e Session "d3d9")
