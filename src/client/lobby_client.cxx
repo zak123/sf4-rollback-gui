@@ -965,12 +965,11 @@ int WINAPI wWinMain(
 
 		if (g_DeviceLost)
 		{
-			static uint64_t s_lastLostLog = 0;
+			// The device is lost for the whole match while SF4 holds
+			// exclusive fullscreen; the entry and recovery are logged
+			// once each (below and at "Present reported device lost"),
+			// not every frame- that spam was burying useful lines.
 			HRESULT hr = g_pd3dDevice->TestCooperativeLevel();
-			if (GetTickCount64() - s_lastLostLog > 1000) {
-				s_lastLostLog = GetTickCount64();
-				spdlog::warn("D3D device lost; TestCooperativeLevel = {:#x}", (unsigned)hr);
-			}
 			if (hr == D3DERR_DEVICELOST)
 			{
 				::Sleep(10);

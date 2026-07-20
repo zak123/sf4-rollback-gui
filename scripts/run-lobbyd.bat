@@ -21,8 +21,16 @@ if not defined IDENTITY (
 set HASH=
 if exist sidecar-hash.txt set /p HASH=<sidecar-hash.txt
 
+rem Supervisor loop: if Lobbyd ever exits (crash, transient error, or an
+rem updater stopping it to swap files), bring it back after a short
+rem pause. The updater ends this task before swapping, so a deliberate
+rem stop doesn't fight the restart.
+:run
 if defined HASH (
 	Lobbyd.exe --port 23450 --no-default-lobby --identity %IDENTITY% --sidecar-hash %HASH%
 ) else (
 	Lobbyd.exe --port 23450 --no-default-lobby --identity %IDENTITY%
 )
+echo Lobbyd exited; restarting in 3s...
+ping -n 4 127.0.0.1 >nul
+goto run

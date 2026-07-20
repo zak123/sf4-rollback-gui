@@ -73,10 +73,15 @@ schtasks /end /tn $taskName 2>$null | Out-Null
 Stop-Process -Name Lobbyd -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
-Copy-Item (Join-Path $tmpDir "*") $dir -Force
-Set-Content $versionPath $tag -NoNewline -Encoding ascii
-
-schtasks /run /tn $taskName | Out-Null
+try {
+	Copy-Item (Join-Path $tmpDir "*") $dir -Force
+	Set-Content $versionPath $tag -NoNewline -Encoding ascii
+}
+finally {
+	# Always bring the server back, even if the swap threw- leaving it
+	# stopped would turn a failed update into an outage.
+	schtasks /run /tn $taskName | Out-Null
+}
 
 # Announce the update, if a webhook is configured. Announcement
 # failures must never affect the update itself.

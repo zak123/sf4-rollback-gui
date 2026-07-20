@@ -1,11 +1,14 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <windows.h>
 
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/wincolor_sink.h>
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 
@@ -40,6 +43,38 @@ static void OnGNSDebugOutput(ESteamNetworkingSocketsDebugOutputType eType, const
 	}
 	else {
 		spdlog::debug("GNS: {}", pszMsg);
+	}
+}
+
+// Log to a rotating file beside the exe as well as the console, so a
+// headless run (scheduled task / service) still leaves a record- the
+// absence of which made the first outage undiagnosable.
+static void SetUpLogging(bool verbose) {
+	std::vector<spdlog::sink_ptr> sinks;
+	sinks.push_back(std::make_shared<spdlog::sinks::wincolor_stdout_sink_mt>());
+
+	wchar_t exePath[MAX_PATH] = { 0 };
+	if (GetModuleFileNameW(NULL, exePath, MAX_PATH)) {
+		std::wstring dir(exePath);
+		size_t slash = dir.find_last_of(L"\\/");
+		if (slash != std::wstring::npos) {
+			std::wstring logPath = dir.substr(0, slash) + L"\\logs\\Lobbyd.log";
+			try {
+				sinks.push_back(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+					logPath, 1048576 * 5, 3, false
+				));
+			}
+			catch (const spdlog::spdlog_ex&) {
+				// File logging is best-effort; the console sink still works.
+			}
+		}
+	}
+
+	auto logger = std::make_shared<spdlog::logger>("Lobbyd", sinks.begin(), sinks.end());
+	spdlog::set_default_logger(logger);
+	spdlog::flush_on(spdlog::level::info);
+	if (verbose) {
+		spdlog::set_level(spdlog::level::debug);
 	}
 }
 
@@ -88,9 +123,7 @@ int main(int argc, char** argv) {
 	app.add_flag("--verbose", bVerbose, "Enable debug logging");
 	CLI11_PARSE(app, argc, argv);
 
-	if (bVerbose) {
-		spdlog::set_level(spdlog::level::debug);
-	}
+	SetUpLogging(bVerbose);
 
 	SteamDatagramErrMsg errMsg;
 	if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
@@ -137,14 +170,31 @@ int main(int argc, char** argv) {
 				nPort, identity, nRoundCount, nRoundTimeSecs, bNoEditionSelect ? "off" : "on"
 			);
 
+			uint64_t nextHeartbeat = GetTickCount64() + 60000;
+			uint64_t lastStepErrorLog = 0;
 			while (!g_bQuit) {
 				server.PrepareForCallbacks();
 				SteamNetworkingSockets()->RunCallbacks();
+
+				// A transient message-poll error must not take the whole
+				// server down- log it (rate-limited) and keep serving.
+				// Previously this broke the loop and exited the process,
+				// which, with no auto-restart, meant a single GNS hiccup
+				// became a multi-minute outage.
 				if (server.Step() != 0) {
-					spdlog::error("Lobbyd session server errored; shutting down");
-					ret = 1;
-					break;
+					uint64_t now = GetTickCount64();
+					if (now - lastStepErrorLog > 1000) {
+						lastStepErrorLog = now;
+						spdlog::error("Lobbyd Step() errored; continuing to serve");
+					}
 				}
+
+				uint64_t now = GetTickCount64();
+				if (now >= nextHeartbeat) {
+					nextHeartbeat = now + 60000;
+					spdlog::info("Lobbyd heartbeat: {} peers, {} lobbies", server.peers.size(), server.registry.lobbies.size());
+				}
+
 				Sleep(10);
 			}
 
