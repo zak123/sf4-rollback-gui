@@ -2201,6 +2201,12 @@ void Overlay::DrawOverlay() {
 
 	// Imitate the main menu being in a transition to prevent typing in
 	// the network window from affecting the main menu.
+	if (fVsBattle::bRematchPending) {
+		Begin("Rematch", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+		Text("Match over- waiting for the next one to start.");
+		Text("Close the game to return to the lobby.");
+		End();
+	}
 	fMainMenu::bOverrideItemObserverState = show_network_window ? rMainMenu::MMIOS_TRANSITION : -1;
 	if (show_network_window) {
 		DrawNetworkWindow(&show_network_window);

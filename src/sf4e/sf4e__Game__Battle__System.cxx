@@ -610,12 +610,22 @@ void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int fra
         }
     }
 
+    // A stale leaving state from the previous game in this process (a
+    // disconnect or abort) must not leak into this one- BattleUpdate
+    // treats RS_ISLEAVING as "wind the battle down".
+    rSystem* system = rSystem::staticMethods.GetSingleton();
+    if (system) {
+        *rSystem::GetReadyState(system) = rSystem::RS_START;
+    }
+
     nNextBattleStartFlowTarget = BF__MATCH_START;
     bUpdateAllowed = false;
     nGgpoWaitStartMs = 0;
     bGgpoEverRan = false;
     bGgpoConnectionInterrupted = false;
-    fVsBattle::bTerminateOnNextLeftBattle = true;
+    // Played matches hold their teardown for the in-process rematch
+    // cycle (see fVsBattle::ExitForeground) instead of terminating the
+    // event tree; spectators still terminate.
     fVsBattle::bOverrideNextRandomSeed = true;
     fVsBattle::nextMatchRandomSeed = rngSeed;
 }

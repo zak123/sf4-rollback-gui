@@ -20,6 +20,7 @@
 #include "../session/sf4e__SessionProtocol.hxx"
 #include "../session/sf4e__SessionServer.hxx"
 
+#include "sf4e__Event.hxx"
 #include "sf4e__Game__Battle.hxx"
 #include "sf4e__Game__Battle__System.hxx"
 #include "sf4e__GameEvents.hxx"
@@ -186,6 +187,13 @@ void fUserApp::_OnVsPreBattleTasksRegistered()
 }
 
 void OnReady(sf4e::SessionClient* const client, const sf4e::SessionClient::Callbacks& c) {
+    // A finished battle holding its teardown means this ALLREADY is a
+    // rematch: roll straight into the next battle, no menu travel.
+    if (fVsBattle::bRematchPending) {
+        fUserApp::StartRematch();
+        return;
+    }
+
     // Since handling a request forces the process to load into a battle,
     // handling the request can only reasonably be done if the process is
     // currently on the main menu.
@@ -299,6 +307,85 @@ void fUserApp::StartServer(uint16 hostPort, std::string& identity, std::string& 
     server->Listen(hostPort);
 }
 
+// How long the post-battle hold waits for the rematch cycle before
+// giving up and returning the player to the lobby app.
+static const uint64_t REMATCH_WAIT_TIMEOUT_MS = 60 * 1000;
+
+void fUserApp::StartRematch() {
+    spdlog::info("Rematch: both sides ready, starting the next battle");
+
+    // The same drive as OnReady's main-menu path, minus the menu
+    // travel: re-apply settings and conditions from the fresh match
+    // data, re-arm the per-battle hooks, and route the event flow
+    // directly into the next battle.
+    RootEvent* root = App::GetRootEvent();
+    ProgressData* progressData = *RootEvent::GetProgressData(root);
+    ProgressData::BattleTypeSettings* BattleTypeSettings = &(ProgressData::GetBattleTypeSettings(progressData)[ProgressData::NBT_PVP]);
+    *ProgressData::GetNextBattleType(progressData) = ProgressData::NBT_PVP;
+    BattleTypeSettings->editionSelect = netplay->client._lobbyData.editionSelect;
+    BattleTypeSettings->rounds = netplay->client._lobbyData.roundCount;
+    BattleTypeSettings->timeLimit = netplay->client._lobbyData.roundTime;
+    _OnVsPreBattleTasksRegistered();
+    fVsBattle::OnTasksRegistered = fUserApp::_OnVsBattleTasksRegistered;
+    sf4e::Event::EventController::ReplaceNextEvent("VersusFromChr");
+    fVsBattle::bRematchPending = false;
+    fVsBattle::bBlockTermination = false;
+}
+
+void fUserApp::TickRematch() {
+    if (!fVsBattle::bRematchPending) {
+        return;
+    }
+
+    if (!netplay) {
+        AbortNetplay(
+            "Lost the session server while waiting for the rematch.\n\n"
+            "The game will now close- your lobby app will put you back "
+            "in the lobby."
+        );
+        return;
+    }
+    SessionClient& client = netplay->client;
+    if (client._lobbyData.members.size() < 2) {
+        AbortNetplay(
+            "Your opponent left the match.\n\n"
+            "The game will now close- your lobby app will put you back "
+            "in the lobby."
+        );
+        return;
+    }
+    uint64_t now = GetTickCount64();
+    if (now - fVsBattle::nRematchHoldStartMs > REMATCH_WAIT_TIMEOUT_MS) {
+        AbortNetplay(
+            "Timed out waiting for the rematch to start.\n\n"
+            "The game will now close- your lobby app will put you back "
+            "in the lobby."
+        );
+        return;
+    }
+
+    // Keep this seat readied while the server shows it unready. Both
+    // games send battle_ended, and the later reset can wipe a ready
+    // that landed between them- so nudge off the authoritative match
+    // data, rate-limited.
+    static uint64_t nLastReadySentMs = 0;
+    int side = -1;
+    for (int i = 0; i < (int)client._lobbyData.members.size() && i < 2; i++) {
+        if (client._lobbyData.members[i].connId == client._cid) {
+            side = i;
+            break;
+        }
+    }
+    if (
+        side >= 0 &&
+        client._matchData.readyMessageNum[side] == -1 &&
+        now - nLastReadySentMs > 1000
+    ) {
+        nLastReadySentMs = now;
+        client.Lobby_Ready();
+    }
+}
+
 void fUserApp::Steam_PostUpdate() {
     if (netplay) {
         netplay->client.PrepareForCallbacks();
@@ -319,6 +406,8 @@ void fUserApp::Steam_PostUpdate() {
             delete server.release();
         }
     }
+
+    TickRematch();
 
     if (fSystem::ggpo) {
         ggpo_idle(fSystem::ggpo, 1);

@@ -844,6 +844,12 @@ int SessionServer::Step()
 				memberIter->data.flags &= (~SessionProtocol::MF_BATTLE_LOADED);
 			}
 			lobby->ClearHandoffs();
+			// Fresh seed for the next game: the apps roll one at ready
+			// time, but the in-process rematch cycle never returns to
+			// the apps, and replaying the old seed would replay the
+			// match's randomness.
+			static std::mt19937_64 seedGen(std::random_device{}());
+			lobby->match.rngSeed = (DWORD)seedGen();
 			lobby->dirty = true;
 		}
 		else if (type == SessionProtocol::MT_LOBBY_REPORTRESULTS) {

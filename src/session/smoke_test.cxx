@@ -492,6 +492,13 @@ int main(int argc, char** argv) {
 				"both games loading releases the battle sync barrier"
 			);
 
+			DWORD seedBefore = 0;
+			{
+				sf4e::Lobby* lobby = server.registry.FindByKey(lobbyKey);
+				if (lobby) {
+					seedBefore = lobby->match.rngSeed;
+				}
+			}
 			gameAlice->c->Battle_Ended();
 			gameBob->c->Battle_Ended();
 			CHECK(
@@ -504,9 +511,9 @@ int main(int argc, char** argv) {
 					for (auto memberIter = lobby->members.begin(); memberIter != lobby->members.end(); memberIter++) {
 						flagsClear = flagsClear && !(memberIter->data.flags & SessionProtocol::MF_BATTLE_LOADED);
 					}
-					return !lobby->match.IsAllReady() && flagsClear;
+					return !lobby->match.IsAllReady() && flagsClear && lobby->match.rngSeed != seedBefore;
 				}),
-				"battle ended resets the ready and loaded cycle"
+				"battle ended resets the ready cycle and re-rolls the seed"
 			);
 
 			gameAlice->readyFired = false;

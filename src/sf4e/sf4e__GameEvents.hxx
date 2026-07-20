@@ -48,6 +48,13 @@ namespace sf4e {
 			static bool bForceNextMatchOnline;
 			static bool bOverrideNextRandomSeed;
 			static bool bTerminateOnNextLeftBattle;
+
+			// Post-battle rematch hold: armed at battle exit for seated
+			// netplay matches. UserApp::TickRematch re-readies while it
+			// holds; UserApp::StartRematch releases it into the next
+			// battle when the server reports both sides ready.
+			static bool bRematchPending;
+			static uint64_t nRematchHoldStartMs;
 			static DWORD nextMatchRandomSeed;
 			static void Install();
 		};

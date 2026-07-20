@@ -7,6 +7,7 @@
 #include "../Dimps/Dimps__GameEvents.hxx"
 #include "../Dimps/Dimps__Platform.hxx"
 #include "sf4e__Event.hxx"
+#include "sf4e__Game__Battle__System.hxx"
 #include "sf4e__GameEvents.hxx"
 #include "sf4e__UserApp.hxx"
 
@@ -31,6 +32,7 @@ using fVsBattle = fGameEvents::VsBattle;
 using fVsPreBattle = fGameEvents::VsPreBattle;
 using fVsStageSelect = fGameEvents::VsStageSelect;
 using fUserApp = sf4e::UserApp;
+using fSystem = sf4e::Game::Battle::System;
 
 int (*fMainMenu::OnModeSelectedOverride)(int mode);
 int fMainMenu::bOverrideItemObserverState = -1;
@@ -50,6 +52,8 @@ uint64_t fVsBattle::nSessionLoadedSentAtMs = 0;
 static const uint64_t SESSION_SYNC_TIMEOUT_MS = 90 * 1000;
 bool fVsBattle::bOverrideNextRandomSeed = false;
 bool fVsBattle::bTerminateOnNextLeftBattle = false;
+bool fVsBattle::bRematchPending = false;
+uint64_t fVsBattle::nRematchHoldStartMs = 0;
 DWORD fVsBattle::nextMatchRandomSeed = 0xffffffff;
 bool fVsPreBattle::bSkipToVersus = false;
 
@@ -308,6 +312,18 @@ void fVsBattle::ExitForeground() {
 	bSessionSentLoaded = false;
 	bSessionSynced = false;
 	nSessionLoadedSentAtMs = 0;
+
+	if (fUserApp::netplay && fSystem::localPlayerHandle != GGPO_INVALID_HANDLE) {
+		// Seated netplay match: hold this event's teardown and idle here
+		// for the rematch cycle instead of unwinding to the title
+		// screen. TickRematch re-readies through the server and
+		// StartRematch releases the hold into the next battle; closing
+		// the game is how a player leaves the loop. (Spectators skip the
+		// hold and terminate as before.)
+		bBlockTermination = true;
+		bRematchPending = true;
+		nRematchHoldStartMs = GetTickCount64();
+	}
 }
 
 void fVsPreBattle::Install() {
