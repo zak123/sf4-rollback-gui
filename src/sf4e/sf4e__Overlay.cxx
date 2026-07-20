@@ -1007,15 +1007,15 @@ void DrawNetworkLobbyPanel() {
 			}
 			if (Button("Send chara")) {
 				if (fUserApp::netplay->client.PreBattle_SetChara(myConditions) != k_EResultOK) {
-					MessageBoxA(NULL, "Could not send chara conditions!", NULL, MB_OK);
+					spdlog::error("Could not send chara conditions!");
 				}
 
 				if (isSelfActiveSide == 0) {
 					if (fUserApp::netplay->client.PreBattle_SetEnv(sf4e::localRand()) != k_EResultOK) {
-						MessageBoxA(NULL, "Could not send environment!", NULL, MB_OK);
+						spdlog::error("Could not send environment!");
 					}
 					if (fUserApp::netplay->client.PreBattle_SetStage(stageID) != k_EResultOK) {
-						MessageBoxA(NULL, "Could not send stage!", NULL, MB_OK);
+						spdlog::error("Could not send stage!");
 					}
 				}
 
@@ -1026,7 +1026,7 @@ void DrawNetworkLobbyPanel() {
 		if (Button("Report win")) {
 			int loser = (isSelfActiveSide == 0) ? 1 : 0;
 			if (fUserApp::netplay->client.Lobby_ReportResults(loser) != k_EResultOK) {
-				MessageBoxA(NULL, "Could not report results!", NULL, MB_OK);
+				spdlog::error("Could not report results!");
 			}
 		}
 	}

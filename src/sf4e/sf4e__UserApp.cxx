@@ -228,13 +228,17 @@ void fUserApp::Install() {
     DetourAttach((PVOID*)&rUserApp::staticMethods.Steam_PostUpdate, Steam_PostUpdate);
 }
 
+static DWORD WINAPI AbortNoticeThread(LPVOID pReason) {
+    MessageBoxA(NULL, (const char*)pReason, "sf4e netplay", MB_OK | MB_ICONERROR);
+    return 0;
+}
+
 void fUserApp::AbortNetplay(const char* szReason) {
     spdlog::error("Netplay aborted: {}", szReason);
-    MessageBoxA(NULL, szReason, "sf4e netplay", MB_OK | MB_ICONERROR);
 
-    // Tear the session down before dying so the server sees a clean
-    // close instead of a timeout, and give the networking thread a
-    // beat to flush the close before the process is torn out from
+    // Tear the session down first so the server frees this seat right
+    // away instead of after a timeout, and give the networking thread
+    // a beat to flush the close before the process is torn out from
     // under it.
     if (netplay) {
         delete netplay.release();
@@ -244,6 +248,18 @@ void fUserApp::AbortNetplay(const char* szReason) {
     }
     Sleep(250);
     GameNetworkingSockets_Kill();
+
+    // Show the reason without demanding a click: the notice dismisses
+    // itself with the process after a few seconds. Stacks of must-click
+    // boxes were a playtest complaint.
+    static char szNotice[512];
+    strncpy_s(szNotice, szReason, _TRUNCATE);
+    HANDLE hNotice = CreateThread(NULL, 0, AbortNoticeThread, szNotice, 0, NULL);
+    if (hNotice) {
+        WaitForSingleObject(hNotice, 8000);
+        CloseHandle(hNotice);
+    }
+
     spdlog::shutdown();
     ExitProcess(1);
 }

@@ -414,11 +414,11 @@ int SessionClient::Step()
 					spdlog::debug("Client: snapshot receipt: valid snapshot @ frame {} on receipt, confirm {}, sent {}", localSnapshot.frameIdx, localSnapshotIter->second.second.confirmed, localSnapshotIter->second.second.sent);
 				}
 				if (memcmp(&m.snapshot, &localSnapshot, sizeof(SessionProtocol::StateSnapshot)) != 0) {
-					// A real desync is always logged- only the routine
-					// flow tracing is gated behind verbose logging.
-					spdlog::error("Client: snapshot receipt: Desync detected!");
-					MessageBoxA(NULL, "Client: snapshot receipt: Desync detected!", NULL, MB_OK);
-					*rSystem::GetReadyState(rSystem::staticMethods.GetSingleton()) = rSystem::RS_ISLEAVING;
+					// Abort through the native leaving flow, which logs
+					// at error level. No message box: blocking the sim
+					// thread here would stall this side into a peer
+					// timeout on top of the desync.
+					fSystem::AbortGgpoMatch("state desync detected between players (snapshot receipt)");
 				}
 
 				if (bVerboseLogging) {
@@ -493,9 +493,8 @@ int SessionClient::Step()
 					// Caught up to the opponent- compare to a snapshot already sent by the opponent.
 					SessionProtocol::StateSnapshot& localSnapshot = localSnapshotIter->second.first;
 					if (memcmp(&remoteSnapshotIter->second, &localSnapshot, sizeof(SessionProtocol::StateSnapshot)) != 0) {
-						spdlog::error("Client: snapshot reconciliation: Desync detected from pending!");
-						MessageBoxA(NULL, "Client: snapshot reconciliation: Desync detected from pending!", NULL, MB_OK); // This tends to be where the issue occurs- how?!
-						*rSystem::GetReadyState(rSystem::staticMethods.GetSingleton()) = rSystem::RS_ISLEAVING;
+						// This tends to be where the issue occurs- how?!
+						fSystem::AbortGgpoMatch("state desync detected between players (snapshot reconciliation)");
 					}
 					localSnapshotIter->second.second.confirmed = true;
 				}
@@ -524,16 +523,20 @@ void SessionClient::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusCh
 	case k_ESteamNetworkingConnectionState_ClosedByPeer:
 	case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
 	{
-		// Print an appropriate message
+		// Log-only, deliberately no message box: this handler runs in
+		// both the lobby app (which auto-reconnects and shows its own
+		// status) and the game's sim thread, where a blocking box
+		// stalls the simulation- and GGPO traffic is peer-to-peer, so
+		// a match can survive a session-server drop that a box would
+		// turn into a peer timeout. Stacked must-click boxes during
+		// reconnect attempts were a playtest complaint.
 		if (pInfo->m_eOldState == k_ESteamNetworkingConnectionState_Connecting)
 		{
 			spdlog::error("Client could not connect: {}", pInfo->m_info.m_szEndDebug);
-			MessageBoxA(NULL, "Client: could not connect- maybe wrong IP or no forwarding", NULL, MB_OK);
 		}
 		else if (pInfo->m_info.m_eState == k_ESteamNetworkingConnectionState_ProblemDetectedLocally)
 		{
 			spdlog::error("Client lost contact with host: {}", pInfo->m_info.m_szEndDebug);
-			MessageBoxA(NULL, "Client: Problem detected locally- lost contact with host", NULL, MB_OK);
 		}
 
 		// Clean up the connection.  This is important!

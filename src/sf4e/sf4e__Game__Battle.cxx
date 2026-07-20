@@ -136,7 +136,7 @@ SoundHandle fSoundPlayerManager::PlaySound(
 			out
 		);
 		if (bWarnOnOverflow && out == 0xffffffff) {
-			MessageBox(NULL, "Sound player overflow", NULL, MB_OK);
+			spdlog::error("Sound player overflow");
 		}
 	}
 
@@ -230,7 +230,7 @@ void fSoundUnit::Install() {
 }
 
 BOOL fSoundUnit::IsStillPlaying(uint32_t managerIdx, uint32_t adapterHandle) {
-	MessageBoxA(NULL, "fSoundUnit::IsStillPlaying- method was suspected dead, but must be implemented", NULL, MB_OK);
+	spdlog::error("fSoundUnit::IsStillPlaying- method was suspected dead, but must be implemented");
 	return FALSE;
 }
 

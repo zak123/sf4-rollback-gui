@@ -571,7 +571,12 @@ void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int fra
     );
     if (result != GGPO_OK) {
         spdlog::error("GGPO session could not start: {}", (int)result);
-        MessageBoxA(NULL, "GGPO could not start, check logs", NULL, MB_OK);
+        sf4e::UserApp::AbortNetplay(
+            "GGPO could not start a session for this match; see the "
+            "sf4e log for details.\n\n"
+            "The game will now close- your lobby app will put you back "
+            "in the lobby."
+        );
     }
     // Upstream's 1000/500 proved too aggressive for WAN play- transient
     // hiccups became disconnects. These values are field-tested in
@@ -585,7 +590,6 @@ void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int fra
         result = ggpo_add_player(ggpo, inPlayers + i, &players[i].handle);
         if (!GGPO_SUCCEEDED(result)) {
             spdlog::error("GGPO session could not add player: {}", (int)result);
-            MessageBoxA(NULL, "GGPO could not add player", NULL, MB_OK);
             continue;
         }
 
@@ -601,7 +605,6 @@ void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int fra
             result = ggpo_add_player(ggpo, inPlayers + i, &players[i].handle);
             if (!GGPO_SUCCEEDED(result)) {
                 spdlog::error("GGPO session could not add spectator: {}", (int)result);
-                MessageBoxA(NULL, "GGPO could not add spectator", NULL, MB_OK);
                 continue;
             }
         }
@@ -640,7 +643,12 @@ void fSystem::StartSpectating(unsigned short localport, int num_players, char* h
     );
     if (result != GGPO_OK) {
         spdlog::error("GGPO session could not start: {}", (int)result);
-        MessageBoxA(NULL, "GGPO could not start, check logs", NULL, MB_OK);
+        sf4e::UserApp::AbortNetplay(
+            "GGPO could not start a session for this match; see the "
+            "sf4e log for details.\n\n"
+            "The game will now close- your lobby app will put you back "
+            "in the lobby."
+        );
     }
 
     nNextBattleStartFlowTarget = BF__MATCH_START;
@@ -724,9 +732,10 @@ bool fSystem::ggpo_save_game_state_callback(unsigned char** buffer, int* len, in
 
     // No empty position in the array- either there aren't enough available
     // states, or the states aren't being released or tracked correctly.
+    // Abort cleanly: the leaving flow stops the GGPO pump, so no more
+    // save requests arrive after this one.
     *buffer = nullptr;
-    spdlog::error("FATAL: Could not store GGPO state!");
-    MessageBoxA(NULL, "FATAL: Could not store GGPO state! Will likely crash! Attach a debugger here!", NULL, MB_OK);
+    AbortGgpoMatch("could not store a GGPO save state (pool exhausted)");
     return false;
 }
 
