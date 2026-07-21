@@ -371,6 +371,174 @@ static SessionClient::Callbacks kCallbacks = {
 };
 
 // -------------------------------------------------------------------
+// Game graphics settings light. Two of the game's own settings break
+// rollback netplay: a "Smooth"/"Variable" frame rate changes the
+// simulation rate itself (mismatched peers desync), and motion blur
+// holds state the save states don't capture. The UI shows a red/green
+// light with a one-click fix; the values live in the game's config.ini
+// and are also fine settings for offline play.
+
+enum GameSettingsState {
+	GS_UNKNOWN = 0,   // config.ini missing or unreadable
+	GS_READY,
+	GS_NEEDS_FIX,
+};
+
+static const struct { const char* key; const char* required; } kRequiredGameSettings[] = {
+	{ "FrameRate", "FIXED" },
+	{ "MotionBlurQuality", "OFF" },
+};
+
+static GameSettingsState g_gameSettingsState = GS_UNKNOWN;
+static uint64_t g_nextGameSettingsCheck = 0;
+
+static std::wstring GameConfigPath() {
+	PWSTR docs;
+	std::wstring out;
+	if (SHGetKnownFolderPath(FOLDERID_Documents, 0, NULL, &docs) == S_OK) {
+		wchar_t file[MAX_PATH];
+		PathCombineW(file, docs, L"CAPCOM\\SUPERSTREETFIGHTERIV\\config.ini");
+		out = file;
+		CoTaskMemFree(docs);
+	}
+	return out;
+}
+
+// Value span of "key=value" at a line start; the game writes one key
+// per line.
+static bool FindIniValue(const std::string& content, const char* key, size_t* valueBegin, size_t* valueEnd) {
+	std::string needle = std::string(key) + "=";
+	size_t pos;
+	if (content.compare(0, needle.size(), needle) == 0) {
+		pos = 0;
+	}
+	else {
+		pos = content.find("\n" + needle);
+		if (pos == std::string::npos) {
+			return false;
+		}
+		pos += 1;
+	}
+	*valueBegin = pos + needle.size();
+	*valueEnd = content.find_first_of("\r\n", *valueBegin);
+	if (*valueEnd == std::string::npos) {
+		*valueEnd = content.size();
+	}
+	return true;
+}
+
+static void CheckGameSettings() {
+	GameSettingsState prev = g_gameSettingsState;
+	std::string content;
+	std::wstring path = GameConfigPath();
+	if (!path.empty()) {
+		std::ifstream in(path.c_str(), std::ios::binary);
+		if (in) {
+			content.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		}
+	}
+	if (content.empty()) {
+		g_gameSettingsState = GS_UNKNOWN;
+	}
+	else {
+		g_gameSettingsState = GS_READY;
+		for (auto& setting : kRequiredGameSettings) {
+			size_t b, e;
+			if (!FindIniValue(content, setting.key, &b, &e) ||
+				content.compare(b, e - b, setting.required) != 0) {
+				g_gameSettingsState = GS_NEEDS_FIX;
+				break;
+			}
+		}
+	}
+	if (g_gameSettingsState != prev) {
+		spdlog::info(
+			"Game settings check: {}",
+			g_gameSettingsState == GS_READY ? "netplay ready" :
+			g_gameSettingsState == GS_NEEDS_FIX ? "needs fixing" :
+			"config.ini not found"
+		);
+	}
+}
+
+static void FixGameSettings() {
+	std::wstring path = GameConfigPath();
+	if (path.empty()) {
+		return;
+	}
+	std::string content;
+	{
+		std::ifstream in(path.c_str(), std::ios::binary);
+		if (!in) {
+			return;
+		}
+		content.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	}
+	for (auto& setting : kRequiredGameSettings) {
+		size_t b, e;
+		if (FindIniValue(content, setting.key, &b, &e)) {
+			if (content.compare(b, e - b, setting.required) != 0) {
+				spdlog::info(
+					"Fixing game setting {}: {} -> {}",
+					setting.key, content.substr(b, e - b), setting.required
+				);
+				content.replace(b, e - b, setting.required);
+			}
+		}
+		else {
+			// The game writes a full config; a missing key means
+			// something unexpected- punt to the game's own options
+			// instead of guessing where the line belongs.
+			spdlog::warn("Game config has no {} line", setting.key);
+			g_app.alerts.push_back(
+				std::string("Couldn't fix ") + setting.key +
+				"- set it in the game's PC graphic options"
+			);
+		}
+	}
+	std::ofstream out(path.c_str(), std::ios::binary | std::ios::trunc);
+	if (out) {
+		out.write(content.data(), (std::streamsize)content.size());
+	}
+	g_nextGameSettingsCheck = 0;
+}
+
+static void DrawGameSettingsLight() {
+	uint64_t now = GetTickCount64();
+	if (now >= g_nextGameSettingsCheck) {
+		g_nextGameSettingsCheck = now + 2000;
+		CheckGameSettings();
+	}
+
+	ImU32 color =
+		g_gameSettingsState == GS_READY ? IM_COL32(70, 220, 100, 255) :
+		g_gameSettingsState == GS_NEEDS_FIX ? IM_COL32(235, 70, 60, 255) :
+		IM_COL32(150, 150, 150, 255);
+	float h = ImGui::GetTextLineHeight();
+	ImVec2 p = ImGui::GetCursorScreenPos();
+	ImGui::GetWindowDrawList()->AddCircleFilled(
+		ImVec2(p.x + h * 0.5f, p.y + h * 0.6f), h * 0.3f, color
+	);
+	ImGui::Dummy(ImVec2(h, h));
+	ImGui::SameLine();
+	switch (g_gameSettingsState) {
+	case GS_READY:
+		ImGui::TextUnformatted("Game settings: netplay ready");
+		break;
+	case GS_NEEDS_FIX:
+		ImGui::TextUnformatted("Game settings: fixed framerate + motion blur off required");
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Fix")) {
+			FixGameSettings();
+		}
+		break;
+	default:
+		ImGui::TextUnformatted("Game settings: config.ini not found (run USF4 once)");
+		break;
+	}
+}
+
+// -------------------------------------------------------------------
 // Actions
 
 static void ConnectToServer() {
@@ -512,6 +680,9 @@ static void DrawLoginScreen() {
 	if (!valid) {
 		ImGui::TextDisabled("Pick a name first");
 	}
+
+	ImGui::Separator();
+	DrawGameSettingsLight();
 }
 
 static void DrawLobbyBrowser() {
@@ -784,6 +955,8 @@ static void DrawSessionScreen() {
 		DropToLogin(nullptr);
 		return;
 	}
+	ImGui::SameLine(0.0f, 24.0f);
+	DrawGameSettingsLight();
 	ImGui::Separator();
 	DrawAlerts();
 
