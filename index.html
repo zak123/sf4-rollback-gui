@@ -3,234 +3,122 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SF4 Rollback GUI — rollback netcode and online lobbies for USF4</title>
-<meta name="description" content="Rollback netcode and online lobbies for Ultra Street Fighter IV on Steam. Chat, matchmaking, and matches that launch the game directly.">
+<title>SF4 Rollback GUI</title>
+<meta name="description" content="Rollback netcode and online lobbies for Ultra Street Fighter IV on Steam.">
 <meta property="og:title" content="SF4 Rollback GUI">
 <meta property="og:description" content="Rollback netcode and online lobbies for Ultra Street Fighter IV on Steam. Join the playtest.">
 <meta property="og:image" content="https://zak123.github.io/sf4-rollback-gui/lobby-client.png">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://zak123.github.io/sf4-rollback-gui/">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🥊</text></svg>">
 <style>
-  :root {
-    --bg: #101014;
-    --panel: #17171d;
-    --panel-2: #1d1d25;
-    --text: #e8e6e3;
-    --muted: #9b98a0;
-    --accent: #e23b2e;
-    --accent-hover: #f04c3f;
-    --border: #2a2a33;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: var(--bg);
-    color: var(--text);
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 16px;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     line-height: 1.6;
+    color: #222;
   }
-  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
-  header {
-    padding: 64px 0 40px;
-    text-align: center;
-    background:
-      radial-gradient(ellipse 70% 60% at 50% -10%, rgba(226, 59, 46, 0.18), transparent);
-    border-bottom: 1px solid var(--border);
+  h1 { margin-bottom: 4px; }
+  h2 { margin-top: 36px; }
+  img { max-width: 100%; border: 1px solid #ccc; }
+  code { background: #f2f2f2; padding: 1px 5px; border-radius: 3px; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 36px 0 20px; }
+  .muted { color: #555; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1b1b1f; color: #ddd; }
+    img { border-color: #444; }
+    code { background: #2a2a2f; }
+    a { color: #8ab4f8; }
+    hr { border-top-color: #3a3a40; }
+    .muted { color: #a5a5ad; }
   }
-  h1 {
-    font-size: clamp(2rem, 6vw, 3rem);
-    letter-spacing: -0.02em;
-    line-height: 1.1;
-  }
-  h1 .accent { color: var(--accent); }
-  .tagline {
-    margin: 14px auto 0;
-    max-width: 560px;
-    font-size: 1.15rem;
-    color: var(--muted);
-  }
-  .cta-row {
-    margin: 28px 0 40px;
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-    flex-wrap: wrap;
-  }
-  .btn {
-    display: inline-block;
-    padding: 12px 26px;
-    border-radius: 8px;
-    font-weight: 600;
-    text-decoration: none;
-    transition: background 0.15s, border-color 0.15s;
-  }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: var(--accent-hover); }
-  .btn-ghost { border: 1px solid var(--border); color: var(--text); }
-  .btn-ghost:hover { border-color: var(--muted); }
-  .shot {
-    max-width: 100%;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
-  }
-  .shot-caption { margin-top: 10px; font-size: 0.85rem; color: var(--muted); }
-  main { padding: 24px 0 8px; }
-  section { padding: 32px 0; border-bottom: 1px solid var(--border); }
-  section:last-of-type { border-bottom: none; }
-  h2 {
-    font-size: 1.5rem;
-    margin-bottom: 14px;
-    letter-spacing: -0.01em;
-  }
-  p + p { margin-top: 12px; }
-  a { color: var(--accent-hover); }
-  .muted { color: var(--muted); }
-  ol.steps { margin: 16px 0 0 1.4em; }
-  ol.steps li { margin-bottom: 10px; }
-  .note {
-    margin-top: 18px;
-    padding: 14px 16px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 0 8px 8px 0;
-    font-size: 0.95rem;
-  }
-  .note + .note { margin-top: 10px; }
-  .note strong { color: var(--text); }
-  code {
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 1px 6px;
-    font-size: 0.9em;
-  }
-  .disclaimer {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 20px 22px;
-    font-size: 0.95rem;
-    color: var(--muted);
-  }
-  .disclaimer strong { color: var(--text); }
-  .disclaimer p + p { margin-top: 10px; }
-  footer {
-    padding: 28px 0 44px;
-    font-size: 0.9rem;
-    color: var(--muted);
-    text-align: center;
-  }
-  footer a { color: var(--muted); }
 </style>
 </head>
 <body>
 
-<header>
-  <div class="wrap">
-    <h1>SF4 <span class="accent">Rollback</span> GUI</h1>
-    <p class="tagline">Rollback netcode and online lobbies for <em>Ultra Street Fighter&nbsp;IV</em> on Steam.</p>
-    <div class="cta-row">
-      <a class="btn btn-primary" href="https://github.com/zak123/sf4-rollback-gui/releases/latest">Download the latest release</a>
-      <a class="btn btn-ghost" href="https://github.com/zak123/sf4-rollback-gui">View on GitHub</a>
-    </div>
-    <img class="shot" src="lobby-client.png" alt="The lobby app: chat, lobby browser, and players list" width="820">
-    <p class="shot-caption">The lobby app — chat, lobby browser, challenges, and quickmatch.</p>
-  </div>
-</header>
+<h1>SF4 Rollback GUI</h1>
+<p>Rollback netcode and online lobbies for <em>Ultra Street Fighter IV</em>
+on Steam. An open-source project, very much in progress.</p>
 
-<main class="wrap">
+<p>
+  <a href="https://github.com/zak123/sf4-rollback-gui/releases/latest">Download the latest release</a> &middot;
+  <a href="https://github.com/zak123/sf4-rollback-gui">Source on GitHub</a> &middot;
+  <a href="https://github.com/zak123/sf4-rollback-gui/issues">Issues</a>
+</p>
 
-  <section id="about">
-    <h2>What is this?</h2>
-    <p>
-      <a href="https://codeberg.org/adanducci/sf4e">sf4e</a> by adanducci injects GGPO
-      rollback netcode — instant inputs, lag hidden by prediction — into USF4 at runtime,
-      without modifying any game files. This project is an independent fork that adds the
-      online experience around it, similar to Fightcade: a desktop app with chat and a
-      lobby browser, dedicated servers, and matches that launch the game directly.
-    </p>
-    <p class="muted">
-      Early playtest. Lobbies, chat, challenges, quickmatch, and auto-rematch work; the
-      current goal is validating real internet matches. No rankings, spectating, or score
-      tracking yet — rematch freely, nothing is recorded.
-    </p>
-  </section>
+<img src="lobby-client.png" alt="The lobby app">
 
-  <section id="download">
-    <h2>Download</h2>
-    <p>
-      You need <a href="https://store.steampowered.com/app/45760/">USF4 on Steam</a>
-      (installed) and Windows 10+. Grab <code>sf4-rollback-gui-client.zip</code> from the
-      <a href="https://github.com/zak123/sf4-rollback-gui/releases/latest">latest release</a>
-      and extract everything into one folder. Everyone in the playtest needs the same
-      release — the server refuses mismatched builds.
-    </p>
-  </section>
+<h2>What is this?</h2>
+<p>
+  <a href="https://codeberg.org/adanducci/sf4e">sf4e</a> by adanducci injects GGPO
+  rollback netcode (instant inputs, lag hidden by prediction) into USF4 at runtime,
+  without modifying any game files. This fork adds the online part around it: a desktop
+  app with chat and a lobby browser, dedicated servers, and matches that launch the game
+  directly.
+</p>
+<p class="muted">
+  Early playtest. Lobbies, chat, challenges, quickmatch, and auto-rematch work; the
+  current goal is validating real internet matches. No rankings, spectating, or score
+  tracking yet &mdash; rematch freely, nothing is recorded.
+</p>
 
-  <section id="playtest">
-    <h2>Join the playtest</h2>
-    <ol class="steps">
-      <li>Run <code>LobbyClient.exe</code> and pick a name — the playtest server
-          (<code>sf4.zak123.com</code>) is prefilled.</li>
-      <li>Create or join a lobby, challenge someone from the players list, or toggle
-          <strong>Looking for match</strong>.</li>
-      <li>Pick your character (P1 also picks the stage) and hit <strong>Ready</strong>.
-          The game launches on its own.</li>
-      <li>At the title screen, press a button on the controller you want to play with.
-          The match starts by itself.</li>
-      <li>Rematches are automatic — when a match ends, the next one starts on its own.
-          Close the game to return to the lobby app.</li>
-    </ol>
-    <div class="note">
-      <strong>Windows will warn you the first time.</strong> The downloads are new and not
-      yet code-signed, so SmartScreen shows &ldquo;Windows protected your PC&rdquo; — click
-      <strong>More info &rarr; Run anyway</strong>. Every binary is built in public by
-      <a href="https://github.com/zak123/sf4-rollback-gui/actions">GitHub Actions</a>
-      straight from the source; code signing is in progress.
-    </div>
-    <div class="note">
-      <strong>If matches keep failing after ~45 seconds</strong>, forward UDP port
-      <code>23457</code> on your router. Two players on the same network usually can't
-      play each other.
-    </div>
-    <div class="note">
-      <strong>Found a bug?</strong>
-      <a href="https://github.com/zak123/sf4-rollback-gui/issues">Open an issue</a> with
-      the logs from <code>%APPDATA%\sf4e\logs</code> and a clip if you can.
-    </div>
-  </section>
+<h2>Join the playtest</h2>
+<p>
+  You need <a href="https://store.steampowered.com/app/45760/">USF4 on Steam</a>
+  (installed) and Windows 10+. Download <code>sf4-rollback-gui-client.zip</code> from the
+  <a href="https://github.com/zak123/sf4-rollback-gui/releases/latest">latest release</a>
+  and extract everything into one folder. Everyone needs the same release &mdash; the
+  server refuses mismatched builds.
+</p>
+<ol>
+  <li>Run <code>LobbyClient.exe</code> and pick a name &mdash; the playtest server
+      (<code>sf4.zak123.com</code>) is prefilled.</li>
+  <li>Create or join a lobby, challenge someone from the players list, or toggle
+      <strong>Looking for match</strong>.</li>
+  <li>Pick your character (P1 also picks the stage) and hit <strong>Ready</strong>.
+      The game launches on its own.</li>
+  <li>At the title screen, press a button on the controller you want to play with.
+      The match starts by itself.</li>
+  <li>Rematches are automatic &mdash; when a match ends, the next one starts on its
+      own. Close the game to return to the lobby app.</li>
+</ol>
+<p>
+  <strong>Windows will warn you the first time.</strong> The downloads are new and not
+  yet code-signed, so SmartScreen shows &ldquo;Windows protected your PC&rdquo; &mdash;
+  click <strong>More info &rarr; Run anyway</strong>. Every binary is built in public by
+  <a href="https://github.com/zak123/sf4-rollback-gui/actions">GitHub Actions</a>
+  straight from the source; code signing is in progress.
+</p>
+<p>
+  <strong>If matches keep failing after ~45 seconds:</strong> forward UDP port
+  <code>23457</code> on your router. Two players on the same network usually can't play
+  each other.
+</p>
+<p>
+  <strong>Bugs:</strong>
+  <a href="https://github.com/zak123/sf4-rollback-gui/issues">open an issue</a> with the
+  logs from <code>%APPDATA%\sf4e\logs</code> and a clip if you can.
+</p>
 
-  <section id="disclaimer">
-    <h2>Disclaimer</h2>
-    <div class="disclaimer">
-      <p>
-        This is an <strong>independent community fork</strong>. It is not related to,
-        affiliated with, or endorsed by
-        <a href="https://codeberg.org/adanducci/sf4e">adanducci's sf4e project</a> —
-        please report problems with this fork
-        <a href="https://github.com/zak123/sf4-rollback-gui/issues">here</a>, not
-        upstream.
-      </p>
-      <p>
-        <em>Ultra Street Fighter IV</em> is a trademark of Capcom. This project is not
-        affiliated with or endorsed by Capcom, modifies nothing on disk, and requires
-        your own legitimate Steam copy of the game.
-      </p>
-    </div>
-  </section>
+<hr>
 
-</main>
-
-<footer>
-  <div class="wrap">
-    MIT licensed &middot; built on <a href="https://codeberg.org/adanducci/sf4e">sf4e</a>
-    and <a href="https://github.com/pond3r/ggpo">GGPO</a>, with tunings from
-    <a href="https://github.com/Confetti3/SF4-Netplay-Launcher">SF4-Netplay-Launcher</a>
-    &middot; <a href="https://github.com/zak123/sf4-rollback-gui">github.com/zak123/sf4-rollback-gui</a>
-  </div>
-</footer>
+<p class="muted">
+  This is an independent community fork. It is not related to, affiliated with, or
+  endorsed by <a href="https://codeberg.org/adanducci/sf4e">adanducci's sf4e project</a>
+  &mdash; please report problems with this fork
+  <a href="https://github.com/zak123/sf4-rollback-gui/issues">here</a>, not upstream.
+</p>
+<p class="muted">
+  <em>Ultra Street Fighter IV</em> is a trademark of Capcom. This project is not
+  affiliated with or endorsed by Capcom, modifies nothing on disk, and requires your own
+  Steam copy of the game.
+</p>
+<p class="muted">
+  MIT licensed. Built on <a href="https://codeberg.org/adanducci/sf4e">sf4e</a> and
+  <a href="https://github.com/pond3r/ggpo">GGPO</a>, with tunings from
+  <a href="https://github.com/Confetti3/SF4-Netplay-Launcher">SF4-Netplay-Launcher</a>.
+</p>
 
 </body>
 </html>
