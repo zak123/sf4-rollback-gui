@@ -113,6 +113,12 @@ namespace sf4e {
 		// Connection related data - public for testing
 		std::string _sidecarHash;
 		uint16_t _ggpoPort;
+
+		// The port reported to the server for this client's seat.
+		// Defaults to the local GGPO port; a successful NAT probe
+		// replaces it with the public port the NAT maps that socket
+		// to, which is what the opponent must actually fire at.
+		uint16_t _reportedGgpoPort;
 		SteamNetworkingIPAddr _serverAddr;
 		std::map<int, SessionProtocol::StateSnapshot> pendingRemoteSnapshots;
 		SessionProtocol::ConnectionID _cid;

@@ -39,6 +39,7 @@ SessionClient::SessionClient(
 	_sidecarHash(sidecarHash),
 	_name(name),
 	_ggpoPort(ggpoPort),
+	_reportedGgpoPort(ggpoPort),
 	_interface(SteamNetworkingSockets()),
 	_conn(k_HSteamNetConnection_Invalid),
 	_connected(false),
@@ -178,7 +179,7 @@ int SessionClient::Step()
 			SessionProtocol::SessionJoinRequest request;
 			request.sidecarHash = _sidecarHash;
 			request.username = _name;
-			request.port = _ggpoPort;
+			request.port = _reportedGgpoPort;
 			request.lobby = _autoJoinLobby;
 			request.handoff = _autoJoinHandoff;
 			json msg = request;
@@ -605,7 +606,7 @@ EResult SessionClient::Lobby_Join(const SessionProtocol::LobbyID& id)
 	SessionProtocol::SessionJoinRequest msg;
 	msg.sidecarHash = _sidecarHash;
 	msg.username = _name;
-	msg.port = _ggpoPort;
+	msg.port = _reportedGgpoPort;
 	msg.lobby = id;
 	json j = msg;
 	EResult result = Send(j, nullptr);

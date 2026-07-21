@@ -47,3 +47,87 @@ bool sf4e::Net::ResolveHostPort(const char* input, SteamNetworkingIPAddr& out) {
 	out.SetIPv4(ipHostOrder, (uint16)port);
 	return true;
 }
+
+static const char PROBE_MAGIC[] = "SF4EPROBE";
+
+bool sf4e::Net::Net_ProbeGgpoPort(const SteamNetworkingIPAddr& server, uint16_t nLocalPort, NatProbe& out) {
+	out.ok = false;
+	out.sock = (uintptr_t)INVALID_SOCKET;
+	uint32 serverIp = server.GetIPv4();
+	if (!serverIp) {
+		return false;
+	}
+
+	SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (s == INVALID_SOCKET) {
+		return false;
+	}
+	BOOL reuse = TRUE;
+	setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+	sockaddr_in local = { 0 };
+	local.sin_family = AF_INET;
+	local.sin_addr.s_addr = INADDR_ANY;
+	local.sin_port = htons(nLocalPort);
+	if (bind(s, (sockaddr*)&local, sizeof(local)) != 0) {
+		closesocket(s);
+		return false;
+	}
+	DWORD timeoutMs = 400;
+	setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeoutMs, sizeof(timeoutMs));
+
+	sockaddr_in dest = { 0 };
+	dest.sin_family = AF_INET;
+	dest.sin_addr.s_addr = htonl(serverIp);
+	dest.sin_port = htons(server.m_port + 1);
+
+	char reply[64] = { 0 };
+	for (int attempt = 0; attempt < 3 && !out.ok; attempt++) {
+		sendto(s, PROBE_MAGIC, sizeof(PROBE_MAGIC) - 1, 0, (sockaddr*)&dest, sizeof(dest));
+		sockaddr_in from = { 0 };
+		int fromLen = sizeof(from);
+		int got = recvfrom(s, reply, sizeof(reply) - 1, 0, (sockaddr*)&from, &fromLen);
+		if (got <= (int)sizeof(PROBE_MAGIC) - 1) {
+			continue;
+		}
+		reply[got] = 0;
+		unsigned int a, b, c, d, p;
+		if (sscanf_s(reply, "SF4EPROBE %u.%u.%u.%u:%u", &a, &b, &c, &d, &p) == 5 && p > 0 && p < 65536) {
+			out.publicPort = (uint16_t)p;
+			snprintf(out.publicAddr, sizeof(out.publicAddr), "%u.%u.%u.%u:%u", a, b, c, d, p);
+			out.ok = true;
+		}
+	}
+	if (!out.ok) {
+		closesocket(s);
+		return false;
+	}
+
+	// Keepalive phase: non-blocking so per-frame ticks never stall.
+	u_long nonblock = 1;
+	ioctlsocket(s, FIONBIO, &nonblock);
+	out.sock = (uintptr_t)s;
+	return true;
+}
+
+void sf4e::Net::Net_ProbeKeepalive(NatProbe& probe, const SteamNetworkingIPAddr& server) {
+	if (!probe.ok || (SOCKET)probe.sock == INVALID_SOCKET) {
+		return;
+	}
+	// Drain stale echoes, then refresh the NAT mapping.
+	char sink[64];
+	while (recv((SOCKET)probe.sock, sink, sizeof(sink), 0) > 0) {
+	}
+	sockaddr_in dest = { 0 };
+	dest.sin_family = AF_INET;
+	dest.sin_addr.s_addr = htonl(server.GetIPv4());
+	dest.sin_port = htons(server.m_port + 1);
+	sendto((SOCKET)probe.sock, PROBE_MAGIC, sizeof(PROBE_MAGIC) - 1, 0, (sockaddr*)&dest, sizeof(dest));
+}
+
+void sf4e::Net::Net_ProbeClose(NatProbe& probe) {
+	if ((SOCKET)probe.sock != INVALID_SOCKET) {
+		closesocket((SOCKET)probe.sock);
+		probe.sock = (uintptr_t)INVALID_SOCKET;
+	}
+	probe.ok = false;
+}

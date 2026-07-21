@@ -4,6 +4,7 @@
 #include <time.h>
 #include <utility>
 #include <vector>
+#include <winsock2.h>
 #include <windows.h>
 
 #include <nlohmann/json.hpp>
@@ -134,11 +135,59 @@ int SessionServer::Listen(uint16 nPort) {
 		return -1;
 	}
 	spdlog::info("Server listening on port {}", nPort);
+
+	// NAT probe echo, one port up. Best-effort: without it, clients
+	// fall back to reporting their local GGPO port as before.
+	SOCKET probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (probe != INVALID_SOCKET) {
+		sockaddr_in bindAddr = { 0 };
+		bindAddr.sin_family = AF_INET;
+		bindAddr.sin_addr.s_addr = INADDR_ANY;
+		bindAddr.sin_port = htons(nPort + 1);
+		u_long nonblock = 1;
+		if (bind(probe, (sockaddr*)&bindAddr, sizeof(bindAddr)) == 0 &&
+			ioctlsocket(probe, FIONBIO, &nonblock) == 0) {
+			_probeSocket = (uintptr_t)probe;
+			spdlog::info("NAT probe echo listening on UDP {}", nPort + 1);
+		}
+		else {
+			spdlog::warn("NAT probe echo could not bind UDP {}; clients will report local ports", nPort + 1);
+			closesocket(probe);
+		}
+	}
 	return 0;
 }
 
 int SessionServer::Step()
 {
+	// Answer NAT probes with the sender's observed address- the
+	// endpoint a peer must use to reach that client's GGPO socket.
+	if ((SOCKET)_probeSocket != INVALID_SOCKET) {
+		for (int n = 0; n < 8; n++) {
+			char buf[64];
+			sockaddr_in from = { 0 };
+			int fromLen = sizeof(from);
+			int got = recvfrom((SOCKET)_probeSocket, buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
+			if (got <= 0) {
+				break;
+			}
+			if (got >= 9 && memcmp(buf, "SF4EPROBE", 9) == 0) {
+				char reply[64];
+				snprintf(
+					reply,
+					sizeof(reply),
+					"SF4EPROBE %u.%u.%u.%u:%u",
+					from.sin_addr.S_un.S_un_b.s_b1,
+					from.sin_addr.S_un.S_un_b.s_b2,
+					from.sin_addr.S_un.S_un_b.s_b3,
+					from.sin_addr.S_un.S_un_b.s_b4,
+					(unsigned int)ntohs(from.sin_port)
+				);
+				sendto((SOCKET)_probeSocket, reply, (int)strlen(reply), 0, (sockaddr*)&from, fromLen);
+			}
+		}
+	}
+
 	ISteamNetworkingMessage* pIncomingMsgs[SESSION_SERVER_MAX_MESSAGES_PER_POLL] = { 0 };
 	int numMsgs = _interface->ReceiveMessagesOnPollGroup(_pollGroup, pIncomingMsgs, SESSION_SERVER_MAX_MESSAGES_PER_POLL);
 
@@ -1118,6 +1167,10 @@ void SessionServer::RemoveFromLobby(HSteamNetConnection conn) {
 
 int SessionServer::Close()
 {
+	if ((SOCKET)_probeSocket != INVALID_SOCKET) {
+		closesocket((SOCKET)_probeSocket);
+		_probeSocket = (uintptr_t)~0;
+	}
 	spdlog::info("Closing connections...");
 	// Close all connections.  We use "linger mode" to ask SteamNetworkingSockets
 	// to flush this out and close gracefully.

@@ -16,6 +16,9 @@
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 
 #include "sf4e__LobbyRegistry.hxx"
+#include <atomic>
+#include <thread>
+
 #include "sf4e__Resolve.hxx"
 #include "sf4e__SessionClient.hxx"
 #include "sf4e__SessionProtocol.hxx"
@@ -229,6 +232,29 @@ int main(int argc, char** argv) {
 		}
 
 		ret = [&server]() -> int {
+			// NAT probe echo round trip: the client helper learns its
+			// own endpoint through the server's echo port. Loopback has
+			// no NAT, so the observed port must equal the bound port.
+			{
+				SteamNetworkingIPAddr probeServer;
+				probeServer.Clear();
+				probeServer.SetIPv4(0x7f000001, TEST_PORT);
+				sf4e::Net::NatProbe probe;
+				std::atomic<bool> probeDone(false);
+				bool probeOk = false;
+				std::thread prober([&]() {
+					probeOk = sf4e::Net::Net_ProbeGgpoPort(probeServer, 24990, probe);
+					probeDone = true;
+				});
+				PumpUntil(server, 3000, [&]() { return probeDone.load(); });
+				prober.join();
+				CHECK(
+					probeOk && probe.ok && probe.publicPort == 24990,
+					"the NAT probe learns its endpoint through the server echo"
+				);
+				sf4e::Net::Net_ProbeClose(probe);
+			}
+
 			TestClientCtx* alice = MakeClient("alice", 24001);
 			g_clients.push_back(alice);
 			TestClientCtx* bob = MakeClient("bob", 24002);

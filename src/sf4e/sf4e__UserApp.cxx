@@ -51,6 +51,12 @@ using sf4e::SessionServer;
 std::unique_ptr<fUserApp::Netplay> fUserApp::netplay;
 std::unique_ptr<SessionServer> fUserApp::server;
 
+// The NAT probe's socket holds the GGPO port's public mapping open
+// (with keepalives) from session join until GGPO takes the port over
+// at battle start.
+static sf4e::Net::NatProbe s_natProbe;
+static uint64_t s_nextProbeKeepaliveMs = 0;
+
 sf4e::UserApp::Netplay::Netplay(
     const SessionClient::Callbacks& callbacks,
     std::string sidecarHash,
@@ -68,6 +74,10 @@ sf4e::UserApp::Netplay::Netplay(
 
 void fUserApp::_OnVsBattleTasksRegistered()
 {
+    // Release the GGPO port: the probe socket held its NAT mapping
+    // open, and GGPO binds the same port next.
+    sf4e::Net::Net_ProbeClose(s_natProbe);
+
     // Start the GGPO connection
     bool isPlayer = false;
     for (int i = 0; i < 2; i++) {
@@ -396,6 +406,25 @@ void fUserApp::StartSession(
         deviceIdx,
         delay
     ));
+
+    // Learn the public endpoint the NAT maps our GGPO port to, so the
+    // seat carries an address the opponent can actually reach- most
+    // NATs rewrite the port, and reporting the local one was the top
+    // cause of the "could not reach the opponent" abort. No reply
+    // (older server, blocked port) falls back to the local port,
+    // which is exactly the old behavior.
+    if (sf4e::Net::Net_ProbeGgpoPort(addr, port, s_natProbe)) {
+        netplay->client._reportedGgpoPort = s_natProbe.publicPort;
+        s_nextProbeKeepaliveMs = GetTickCount64() + 15000;
+        spdlog::info(
+            "NAT probe: public endpoint {} for local GGPO port {}",
+            s_natProbe.publicAddr, port
+        );
+    }
+    else {
+        spdlog::info("NAT probe: no reply; reporting local GGPO port {}", port);
+    }
+
     netplay->client._autoJoinLobby = { lobbyHost, lobbyKey };
     netplay->client._autoJoinHandoff = handoffToken;
     netplay->client.Connect(addr);
@@ -523,6 +552,12 @@ void fUserApp::Steam_PostUpdate() {
     }
 
     TickRematch();
+
+    // Keep the probed NAT mapping warm until GGPO takes the port over.
+    if (s_natProbe.ok && netplay && GetTickCount64() >= s_nextProbeKeepaliveMs) {
+        s_nextProbeKeepaliveMs = GetTickCount64() + 15000;
+        sf4e::Net::Net_ProbeKeepalive(s_natProbe, netplay->client._serverAddr);
+    }
 
     if (fSystem::ggpo) {
         ggpo_idle(fSystem::ggpo, 1);
