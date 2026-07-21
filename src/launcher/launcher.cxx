@@ -336,6 +336,14 @@ int WINAPI wWinMain(
 	int nSynctestInputEvery = 4;
 	app.add_option("--synctest-frames", nSynctestFrames, "Sync-test rollback depth in frames")->check(CLI::Range(1, 8));
 	app.add_option("--synctest-input-every", nSynctestInputEvery, "Reroll random inputs every N frames during synctest; 0 reads real controllers instead")->check(CLI::Range(0, 60));
+	int nSynctestP1 = -1;
+	int nSynctestP2 = -1;
+	int nSynctestStage = -1;
+	std::string synctestSeed;
+	app.add_option("--synctest-p1", nSynctestP1, "Synctest: P1 character id (0-43); default random")->check(CLI::Range(0, 43));
+	app.add_option("--synctest-p2", nSynctestP2, "Synctest: P2 character id (0-43); default random")->check(CLI::Range(0, 43));
+	app.add_option("--synctest-stage", nSynctestStage, "Synctest: stage id (0-29); default random")->check(CLI::Range(0, 29));
+	app.add_option("--synctest-seed", synctestSeed, "Synctest: battle and input seed (decimal or 0x hex); default random. The picks and seed of every run are logged for exact replay");
 	int argc;
 	LPWSTR* argv = CommandLineToArgvW(
 		// Intentionally do _not_ use lpCmdLine here. Windows removes
@@ -367,6 +375,12 @@ int WINAPI wWinMain(
 	if (args.bSynctest) {
 		args.nSynctestDistance = (uint8_t)nSynctestFrames;
 		args.nSynctestInputEvery = (uint8_t)nSynctestInputEvery;
+		args.nSynctestP1 = (int16_t)nSynctestP1;
+		args.nSynctestP2 = (int16_t)nSynctestP2;
+		args.nSynctestStage = (int16_t)nSynctestStage;
+		if (!synctestSeed.empty()) {
+			args.nSynctestSeed = (uint32_t)strtoul(synctestSeed.c_str(), nullptr, 0);
+		}
 	}
 
 	// Compute the path to the sidecar DLL based on the launcher's directory.

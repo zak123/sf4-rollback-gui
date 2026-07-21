@@ -225,6 +225,11 @@ void fUserApp::StartSynctestDrive() {
     (rMainMenu::ToItemObserver(mainMenu)->*rMainMenu::itemObserverMethods.GoToVersusMode)();
 }
 
+static int s_nSynctestP1 = 0;
+static int s_nSynctestP2 = 1;
+static int s_nSynctestStage = 0;
+static DWORD s_nSynctestSeed = 0;
+
 void fUserApp::_OnVsPreBattleTasksRegistered_Synctest() {
     char* vsModeQuery[] = { "VSMode" };
     rVsMode* mode = (rVsMode*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsModeQuery, 1);
@@ -233,16 +238,30 @@ void fUserApp::_OnVsPreBattleTasksRegistered_Synctest() {
         return;
     }
 
-    // Fixed, valid picks- the first two roster entries with default
-    // everything, the same shape the lobby app sends for a default
-    // ready. Fixed picks plus a fixed seed keep runs reproducible.
+    // Resolve picks: explicit launcher flags win, otherwise roll
+    // randomly- different characters exercise different state
+    // (projectiles, stances, unique meters), which is where capture
+    // gaps hide. The seed drives both the battle RNG and the
+    // randomized input stream, so the log line replays a run exactly.
+    s_nSynctestP1 = sf4e::args.nSynctestP1 >= 0 ? sf4e::args.nSynctestP1 : (int)(sf4e::localRand() % 44);
+    s_nSynctestP2 = sf4e::args.nSynctestP2 >= 0 ? sf4e::args.nSynctestP2 : (int)(sf4e::localRand() % 44);
+    s_nSynctestStage = sf4e::args.nSynctestStage >= 0 ? sf4e::args.nSynctestStage : (int)(sf4e::localRand() % 30);
+    s_nSynctestSeed = sf4e::args.nSynctestSeed != 0 ? sf4e::args.nSynctestSeed : (DWORD)sf4e::localRand();
+    spdlog::info(
+        "Synctest picks: p1 chara {} p2 chara {} stage {} seed {:#010x} "
+        "(reproduce: --synctest --synctest-p1 {} --synctest-p2 {} --synctest-stage {} --synctest-seed {:#x})",
+        s_nSynctestP1, s_nSynctestP2, s_nSynctestStage, s_nSynctestSeed,
+        s_nSynctestP1, s_nSynctestP2, s_nSynctestStage, s_nSynctestSeed
+    );
+
     Dimps::Platform::dString* stageName = rVsMode::GetStageName(mode);
     rVsMode::ConfirmedPlayerConditions* conditions = rVsMode::GetConfirmedPlayerConditions(mode);
     for (int i = 0; i < 2; i++) {
+        int charaID = i == 0 ? s_nSynctestP1 : s_nSynctestP2;
         rVsMode::ConfirmedCharaConditions chara = { 0 };
-        chara.charaID = (BYTE)i;
+        chara.charaID = (BYTE)charaID;
         chara.unc_edition = Dimps::Game::Battle::ED_USF4;
-        *(rVsMode::ConfirmedPlayerConditions::GetCharaID(&conditions[i])) = i;
+        *(rVsMode::ConfirmedPlayerConditions::GetCharaID(&conditions[i])) = charaID;
         *(rVsMode::ConfirmedPlayerConditions::GetSideActive(&conditions[i])) = 1;
         memcpy_s(
             rVsMode::ConfirmedPlayerConditions::GetCharaConditions(&conditions[i]),
@@ -251,19 +270,18 @@ void fUserApp::_OnVsPreBattleTasksRegistered_Synctest() {
             sizeof(chara)
         );
     }
-    (stageName->*Dimps::Platform::dString::publicMethods.assign)(Dimps::stageCodes[0], 4);
-    *(rVsMode::GetStageCode(mode)) = 0;
+    (stageName->*Dimps::Platform::dString::publicMethods.assign)(Dimps::stageCodes[s_nSynctestStage], 4);
+    *(rVsMode::GetStageCode(mode)) = s_nSynctestStage;
 }
 
 void fUserApp::_OnVsBattleTasksRegistered_Synctest() {
-    // Arm only- the session starts once the battle reports initialized
-    // (VsBattle::HasInitialized). Starting it here, during the loading
-    // screen, made the sync-test backend save its frame-0 state from a
-    // half-built battle: its constructor saves synchronously.
-    // Fixed seed: identical runs reproduce identical divergences.
+    // Arm only- the session starts once the battle flow starts.
+    // Starting it here, during the loading screen, made the sync-test
+    // backend save its frame-0 state from a half-built battle: its
+    // constructor saves synchronously.
     fSystem::bSynctestPending = true;
     fSystem::nSynctestPendingDistance = sf4e::args.nSynctestDistance;
-    fSystem::nSynctestPendingSeed = 0x5F4E0001;
+    fSystem::nSynctestPendingSeed = s_nSynctestSeed;
     spdlog::info("Synctest: battle tasks registered, session start armed");
 }
 

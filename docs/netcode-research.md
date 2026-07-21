@@ -89,22 +89,51 @@ number.
 ### Using the synctest (P1, implemented)
 
     Launcher.exe --synctest [--synctest-frames N] [--synctest-input-every N]
+                 [--synctest-p1 N] [--synctest-p2 N] [--synctest-stage N]
+                 [--synctest-seed S]
 
 Boots the game, and once past the title screen drives itself into a
-local Ryu-vs-Ken battle (7 rounds, 99s, fixed seed) running under
-GGPO's sync-test backend: every frame is rolled back
-`--synctest-frames` deep (default 1) and re-simulated, and full-state
-checksums compared. Both sides feed randomized inputs rerolled every
-`--synctest-input-every` frames (default 4); pass 0 to read real
-controllers and play the soak by hand instead.
+local battle (7 rounds, 99s) running under GGPO's sync-test backend:
+every frame is rolled back `--synctest-frames` deep (default 1) and
+re-simulated, and full-state checksums compared. Both sides feed
+randomized inputs rerolled every `--synctest-input-every` frames
+(default 4); pass 0 to read real controllers and play the soak by
+hand instead.
 
-Watch `%APPDATA%\sf4e\logs\sf4e.log`:
+Characters, stage, and seed roll randomly per run- different
+characters exercise different state, which is where capture gaps
+hide- and every run logs a `Synctest picks:` line with the exact
+flags to replay it. The seed drives the battle RNG *and* the
+randomized input stream, so a replayed run diverges on the same frame.
+
+For unattended log gathering, the soak harness loops runs, nudges each
+past the title screen, and files per-run logs plus a verdict summary:
+
+    scripts\synctest-soak.ps1 -Runs 20 [-Frames 8] [-StopOnDivergence]
+
+Watch `%APPDATA%\sf4e\logs\sf4e.log` (or `synctest-results\`):
 
 - `Synctest: N frames verified clean` every 600 frames = healthy.
-- `SYNCTEST DIVERGENCE` = a determinism break was caught. Two state
-  dumps follow (original vs. re-simulated); the first key whose
-  checksum differs between them names the subsystem that diverged.
-  Runs use a fixed seed and fixed picks, so a divergence reproduces.
+- `SYNCTEST DIVERGENCE at frame N` = a determinism break, with the
+  diverging components listed (memento key + its mementoable object,
+  or the flow-globals group).
+
+### Findings ledger
+
+1. **Rollback across a battle-flow transition diverges (found
+   2026-07-20, first synctest session).** Two runs (random inputs,
+   frames 2535/2678 ≈ the 42-45s mark, where round transitions land)
+   diverged in all three flow-global groups while every memento key
+   stayed clean: flow ids/frames drift, the re-simulation's flow
+   callback pointers are NULL where the original run had one set, and
+   the GameManager copy differs. Reading: the battle-flow machinery
+   isn't fully captured/restored, so a rollback that crosses a flow
+   transition (round end) re-simulates a different flow timeline.
+   Real matches play clean because mid-round rollbacks never touch
+   this- but a rollback landing exactly on a round boundary would
+   desync. Fix candidates: capture the missing flow state in the
+   save state, or hold rollback across flow transitions the way the
+   game holds inputs during them.
 
 ## What requires the game executable
 

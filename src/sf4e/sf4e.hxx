@@ -33,6 +33,13 @@ namespace sf4e {
 		bool bSynctest = false;
 		uint8_t nSynctestDistance = 1;
 		uint8_t nSynctestInputEvery = 4;
+
+		// Synctest picks: negative/zero means "roll randomly and log a
+		// reproduce line". Set explicitly to replay a logged run.
+		int16_t nSynctestP1 = -1;
+		int16_t nSynctestP2 = -1;
+		int16_t nSynctestStage = -1;
+		uint32_t nSynctestSeed = 0;
 	} Args;
 
 	typedef struct Payload {

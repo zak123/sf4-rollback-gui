@@ -81,6 +81,12 @@ DWORD fSystem::nSynctestPendingSeed = 0;
 // and the end-of-run summary.
 static int s_nSynctestFramesVerified = 0;
 
+// Randomized synctest inputs come from a dedicated generator seeded
+// with the run's seed, so a logged run replays with identical inputs-
+// localRand is wall-clock seeded and would shift the divergence frame
+// between runs.
+static std::mt19937 s_synctestInputRand;
+
 // What bUpdateAllowed held before a connection interruption paused the
 // simulation, restored when the connection resumes.
 static bool s_bUpdateAllowedBeforeInterrupt = true;
@@ -155,13 +161,29 @@ static int ChecksumSaveState(const fSystem::SaveState* s, std::vector<uint32_t>*
     // deterministic simulation state. A first synctest run confirmed
     // they differ between a frame and its re-simulation while every
     // memento key matched.
-    uint32_t g1 = 0, g2 = 0;
-    Fletcher32(g1, g2, &s->d, sizeof(s->d));
-    uint32_t globals = (g2 << 16) | g1;
-    if (outParts) {
-        outParts->push_back(globals);
-    }
-    Fletcher32(s1, s2, &globals, sizeof(globals));
+    //
+    // The flow globals hash as three parts so a divergence names the
+    // field group: ids/frames, the flow callback pointers, and the
+    // GameManager copy.
+    auto pushPart = [&](const void* p, size_t len) {
+        uint32_t e1 = 0, e2 = 0;
+        Fletcher32(e1, e2, p, len);
+        uint32_t entry = (e2 << 16) | e1;
+        if (outParts) {
+            outParts->push_back(entry);
+        }
+        Fletcher32(s1, s2, &entry, sizeof(entry));
+    };
+    const fSystem::SaveState::GlobalData& d = s->d;
+    pushPart(
+        &d.CurrentBattleFlow,
+        (const char*)&d.BattleFlowSubstateCallable_aa9258 - (const char*)&d.CurrentBattleFlow
+    );
+    pushPart(
+        &d.BattleFlowSubstateCallable_aa9258,
+        sizeof(d.BattleFlowSubstateCallable_aa9258) + sizeof(d.BattleFlowCallback_CallEveryFrame_aa9254)
+    );
+    pushPart(&d.gameManager, sizeof(d.gameManager));
     return (int)((s2 << 16) | s1);
 }
 
@@ -203,9 +225,11 @@ static void SynctestCompareFrame(int frame, const fSystem::SaveState* state, std
                 );
             }
             else {
+                size_t tail = k - nKeys;
                 spdlog::error(
-                    "  part {:3} (flow globals): original {:08x} resim {:08x}",
+                    "  part {:3} ({}): original {:08x} resim {:08x}",
                     k,
+                    tail == 0 ? "battle flow ids/frames" : tail == 1 ? "flow callables" : "game manager",
                     prior->second[k],
                     parts[k]
                 );
@@ -436,8 +460,9 @@ void fSystem::BattleUpdate() {
                             nLastRandomInputFrame < 0 ||
                             (currentFrame - nLastRandomInputFrame) > nRandomizeLocalInputsEveryXFramesInGGPO
                         ) {
-                            randomInputs[0] = { localRand(), localRand() };
-                            randomInputs[1] = { localRand(), localRand() };
+                            std::mt19937& gen = bSynctestSession ? s_synctestInputRand : sf4e::localRand;
+                            randomInputs[0] = { gen(), gen() };
+                            randomInputs[1] = { gen(), gen() };
                             nLastRandomInputFrame = currentFrame;
                         }
                         inputs = randomInputs[i];
@@ -837,6 +862,7 @@ void fSystem::StartSynctest(int nDistance, DWORD rngSeed) {
     bSynctestSession = true;
     s_nSynctestFramesVerified = 0;
     s_synctestFrameHashes.clear();
+    s_synctestInputRand.seed(rngSeed);
     GGPOErrorCode result = ggpo_start_synctest(
         &ggpo,
         &cb,
