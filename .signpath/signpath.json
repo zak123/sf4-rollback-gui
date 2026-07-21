@@ -1,0 +1,35 @@
+{
+  "projectName": "sf4-rollback-gui",
+  "repositoryUrl": "https://github.com/zak123/sf4-rollback-gui",
+  "repositoryType": "git",
+  "defaultBranch": "main",
+  "signingProfiles": [
+    {
+      "name": "release",
+      "description": "Signed playtest bundles (client and server zips)",
+      "certificateProfile": "SignPath Foundation",
+      "build": {
+        "workflow": "build.yml",
+        "trigger": "push"
+      },
+      "artifacts": [
+        {
+          "path": "msvc-build/ci/Launcher.exe",
+          "signatureType": "Authenticode"
+        },
+        {
+          "path": "msvc-build/ci/Sidecar.dll",
+          "signatureType": "Authenticode"
+        },
+        {
+          "path": "msvc-build/ci/LobbyClient.exe",
+          "signatureType": "Authenticode"
+        },
+        {
+          "path": "msvc-build/ci/Lobbyd.exe",
+          "signatureType": "Authenticode"
+        }
+      ]
+    }
+  ]
+}

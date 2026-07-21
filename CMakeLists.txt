@@ -2,10 +2,11 @@ cmake_minimum_required (VERSION 3.20)
 
 project (
     sf4e
-    VERSION 0.0.1
+    VERSION 0.1.4
     DESCRIPTION "A process-inspection and modification tool for the Steam release of Ultra Street Fighter 4."
     HOMEPAGE_URL "https://gitlab.com/adanducci/sf4e"
 )
+enable_language(RC)
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG")
 set(CMAKE_CXX_STANDARD 11)
@@ -22,6 +23,22 @@ find_package(protobuf CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
 find_path(VALVEFILEVDF_INCLUDE_DIRS "vdf_parser.hpp")
+
+# Stamp Windows version metadata (publisher, description, version) on
+# the shipped binaries. Metadata-less unsigned executables score worse
+# with Defender's heuristics and show nothing in file properties.
+# Bump the project VERSION above alongside releases.
+function(sf4e_add_version_resource target filetype description filename)
+    set(VER_FILETYPE "${filetype}")
+    set(VER_DESCRIPTION "${description}")
+    set(VER_FILENAME "${filename}")
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/src/version.rc.in"
+        "${CMAKE_BINARY_DIR}/version_rc/${target}.rc"
+        @ONLY
+    )
+    target_sources(${target} PRIVATE "${CMAKE_BINARY_DIR}/version_rc/${target}.rc")
+endfunction()
 
 add_library(Dimps STATIC
     "src/Dimps/Dimps.hxx"
@@ -152,6 +169,11 @@ target_include_directories(Sidecar PRIVATE ${VALVEFILEVDF_INCLUDE_DIRS})
 target_link_libraries(Sidecar PRIVATE ${LIB_DETOURS} Dimps sf4e)
 
 target_compile_definitions(Launcher PRIVATE -D_UNICODE -DUNICODE)
+
+sf4e_add_version_resource(Launcher 0x1L "sf4e rollback netplay launcher for USF4" "Launcher.exe")
+sf4e_add_version_resource(Sidecar 0x2L "sf4e rollback netplay sidecar for USF4" "Sidecar.dll")
+sf4e_add_version_resource(LobbyClient 0x1L "sf4e lobby client" "LobbyClient.exe")
+sf4e_add_version_resource(Lobbyd 0x1L "sf4e dedicated lobby server" "Lobbyd.exe")
 
 install(
   TARGETS Launcher Sidecar

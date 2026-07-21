@@ -33,8 +33,16 @@ You need [USF4 on Steam](https://store.steampowered.com/app/45760/)
    stage), and hit **Ready**. The game launches on its own.
 4. At the title screen, press a button on the controller you want to
    play with. The match starts by itself.
-5. Rematch by readying up again in-game. Close the game to return to
-   the lobby app.
+5. Rematches are automatic- when a match ends, the next one starts by
+   itself. Close the game to return to the lobby app.
+
+**Windows will warn you the first time.** The downloads are new and not
+yet code-signed, so SmartScreen shows "Windows protected your PC"-
+click **More info → Run anyway**. If Defender quarantines a file,
+restore it and add an exclusion; every binary is built in public by
+[GitHub Actions](https://github.com/zak123/sf4-rollback-gui/actions)
+straight from this source. Code signing is
+[in progress](docs/signing.md).
 
 **If matches keep failing after ~45 seconds:** forward UDP port 23457
 on your router. Two players on the same network usually can't play each
