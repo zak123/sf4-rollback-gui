@@ -87,6 +87,30 @@ void fUserApp::_OnVsBattleTasksRegistered()
         }
     }
     if (isPlayer) {
+        // Relay routing: when the server decided this match can't be
+        // traversed directly, both games register with the relay from
+        // their GGPO port (shared token = the lobby ID) and then aim
+        // GGPO at the relay instead of the peer. The relay cross-
+        // forwards, so each side only ever talks to the always-
+        // reachable server- works behind any NAT.
+        const std::string& relayEndpoint = netplay->client._matchData.relayEndpoint;
+        int selfSeat = -1;
+        for (int i = 0; i < 2 && i < (int)netplay->client._lobbyData.members.size(); i++) {
+            if (netplay->client._lobbyData.members[i].name == netplay->client._name) {
+                selfSeat = i;
+            }
+        }
+        if (!relayEndpoint.empty() && selfSeat >= 0) {
+            std::string token =
+                netplay->client._lobbyData.id.host + ":" + netplay->client._lobbyData.id.key;
+            if (sf4e::Net::Net_RelayRegister(relayEndpoint.c_str(), netplay->client._ggpoPort, token.c_str(), selfSeat)) {
+                spdlog::info("Relay: registered seat {} with {} for match {}", selfSeat, relayEndpoint, token);
+            }
+            else {
+                spdlog::warn("Relay: could not register with {}", relayEndpoint);
+            }
+        }
+
         GGPOPlayer players[MAX_SF4E_PROTOCOL_USERS];
         for (int i = 0; i < 2 && i < netplay->client._lobbyData.members.size(); i++) {
             SessionProtocol::MemberData& memberData = netplay->client._lobbyData.members[i];
@@ -107,16 +131,24 @@ void fUserApp::_OnVsBattleTasksRegistered()
             else {
                 SessionProtocol::MemberData& memberData = netplay->client._lobbyData.members[i];
                 player.type = GGPO_PLAYERTYPE_REMOTE;
-                if (memberData.ip.empty()) {
+                if (!relayEndpoint.empty()) {
+                    // Aim at the relay; it forwards to the real peer.
+                    std::string ep = relayEndpoint;
+                    size_t colon = ep.find_last_of(':');
+                    std::string ip = ep.substr(0, colon);
+                    strcpy_s(player.u.remote.ip_address, 32, ip.c_str());
+                    player.u.remote.port = (uint16_t)atoi(ep.c_str() + colon + 1);
+                }
+                else if (memberData.ip.empty()) {
                     char szAddr[SteamNetworkingIPAddr::k_cchMaxString];
                     netplay->client._serverAddr.ToString(szAddr, sizeof(szAddr), false);
                     strcpy_s(player.u.remote.ip_address, 32, szAddr);
+                    player.u.remote.port = memberData.port;
                 }
                 else {
                     strcpy_s(player.u.remote.ip_address, 32, memberData.ip.c_str());
+                    player.u.remote.port = memberData.port;
                 }
-
-                player.u.remote.port = memberData.port;
             }
         }
         for (int i = 2; i < netplay->client._lobbyData.members.size(); i++) {
@@ -422,13 +454,14 @@ void fUserApp::StartSession(
         );
         if (s_natProbe.symmetricKnown && s_natProbe.symmetric) {
             // The probed endpoint is only valid toward the server-
-            // peers will see a different mapping. Warn here and in the
-            // handshake watchdog's abort message.
+            // peers will see a different mapping. Flag for relay, warn
+            // here and in the handshake watchdog's abort message.
             fSystem::bNatSymmetricHint = true;
+            netplay->client._natFlags |= SessionProtocol::NF_NEEDS_RELAY;
             spdlog::warn(
                 "NAT probe: SYMMETRIC NAT- the second destination observed port {} "
-                "instead. Direct connections will usually fail; forwarding UDP "
-                "port {} on the router fixes this machine.",
+                "instead. Requesting relay; forwarding UDP port {} on the router "
+                "would also fix this machine.",
                 s_natProbe.publicPort2, port
             );
         }
@@ -440,7 +473,10 @@ void fUserApp::StartSession(
         }
     }
     else {
-        spdlog::info("NAT probe: no reply; reporting local GGPO port {}", port);
+        // No probe reply at all- report the local port, and request a
+        // relay since a direct hole punch is unlikely to work.
+        netplay->client._natFlags |= SessionProtocol::NF_NEEDS_RELAY;
+        spdlog::info("NAT probe: no reply; reporting local GGPO port {} and requesting relay", port);
     }
 
     netplay->client._autoJoinLobby = { lobbyHost, lobbyKey };

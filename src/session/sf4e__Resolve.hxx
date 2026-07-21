@@ -40,5 +40,13 @@ namespace sf4e {
 		bool Net_ProbeGgpoPort(const SteamNetworkingIPAddr& server, uint16_t nLocalPort, NatProbe& out);
 		void Net_ProbeKeepalive(NatProbe& probe, const SteamNetworkingIPAddr& server);
 		void Net_ProbeClose(NatProbe& probe);
+
+		// Register this game's GGPO port with the match relay so the
+		// relay learns the public endpoint the NAT maps it to. Sends
+		// "SF4ERELAY <token> <seat>" a few times from a socket bound to
+		// nLocalPort, then closes it (GGPO binds the same port next,
+		// reusing the mapping). relayEndpoint is "ip:port". Returns
+		// false if the endpoint won't parse.
+		bool Net_RelayRegister(const char* relayEndpoint, uint16_t nLocalPort, const char* token, int seat);
 	}
 }

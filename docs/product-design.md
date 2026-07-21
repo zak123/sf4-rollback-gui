@@ -354,6 +354,37 @@ smoke-testable, real-NAT success needs the playtest), measure the
 connect rate, then decide the relay's urgency (another 1–2 days).
 Nothing touches the rollback core — GGPO just gets better addresses.
 
+### Implementation status (2026-07-21)
+
+- **Phase 1 (endpoint discovery) — shipped v0.1.6.** Server runs UDP
+  echoes at listenPort+1/+2; each game probes both from its GGPO port,
+  reports the observed public port for its seat, and detects symmetric
+  NAT from a per-destination port difference. A single coordinated
+  punch wasn't added separately — GGPO's own simultaneous fire already
+  serves as the punch once both sides carry correct public endpoints.
+- **Phase 3 (relay) — built (unreleased at time of writing).** Server
+  runs a UDP relay at listenPort+3 (23453). A game whose probe found a
+  symmetric NAT or got no reply sets `NF_NEEDS_RELAY` in its join; the
+  server, when either seat of a match sets it, stamps
+  `MatchData.relayEndpoint` ("ip:port") into the data update. Both
+  games then register with the relay from their GGPO port (token = the
+  lobby ID) and aim GGPO at the relay; it cross-forwards datagrams
+  between the two registered endpoints. Each side only ever sends
+  outbound to the always-reachable server, so it works behind any NAT
+  including symmetric/CGNAT. Direct P2P stays the fast path for clean
+  pairs.
+  - **Residual risk:** registration and GGPO share the GGPO port
+    across a socket close/rebind, relying on the NAT reusing the
+    mapping for the same local port + relay destination. Holds on
+    typical NATs (same assumption as the probe keepalive); if a NAT
+    assigns a fresh mapping to GGPO's socket, its first packets teach
+    the relay nothing (registration carried the old endpoint) and
+    forwarding fails. Measure in the playtest; the fallback is holding
+    one socket for both, which needs deeper GGPO-socket integration.
+  - **Not yet built:** the private-endpoint punch for same-router
+    hairpin pairs (§10.2) — those still need the relay or a LAN direct
+    connect.
+
 ## 11. In-process rematch loop (researched 2026-07-20)
 
 **Problem.** After every match the game force-terminates its event tree

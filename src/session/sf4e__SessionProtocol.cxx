@@ -37,6 +37,7 @@ namespace sf4e {
 			readyMessageNum[1] = -1;
 			stageID = -1;
 			rngSeed = 0xffffffff;
+			relayEndpoint.clear();
 			memset(chara, 0, sizeof(Dimps::GameEvents::VsMode::ConfirmedCharaConditions) * 2);
 		}
 

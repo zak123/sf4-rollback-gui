@@ -119,6 +119,11 @@ namespace sf4e {
 		// replaces it with the public port the NAT maps that socket
 		// to, which is what the opponent must actually fire at.
 		uint16_t _reportedGgpoPort;
+
+		// NAT flags reported in join requests (SessionProtocol::NatFlag
+		// bits). The game sets NF_NEEDS_RELAY when its probe found a
+		// symmetric NAT or got no reply.
+		uint32_t _natFlags = 0;
 		SteamNetworkingIPAddr _serverAddr;
 		std::map<int, SessionProtocol::StateSnapshot> pendingRemoteSnapshots;
 		SessionProtocol::ConnectionID _cid;

@@ -182,6 +182,7 @@ int SessionClient::Step()
 			request.port = _reportedGgpoPort;
 			request.lobby = _autoJoinLobby;
 			request.handoff = _autoJoinHandoff;
+			request.natFlags = _natFlags;
 			json msg = request;
 			if (Send(msg, nullptr) != k_EResultOK) {
 				spdlog::warn("Client could send initial join request");

@@ -153,3 +153,48 @@ void sf4e::Net::Net_ProbeClose(NatProbe& probe) {
 	}
 	probe.ok = false;
 }
+
+bool sf4e::Net::Net_RelayRegister(const char* relayEndpoint, uint16_t nLocalPort, const char* token, int seat) {
+	SteamNetworkingIPAddr relay;
+	relay.Clear();
+	if (!relay.ParseString(relayEndpoint) || relay.m_port == 0) {
+		return false;
+	}
+	uint32 relayIp = relay.GetIPv4();
+	if (!relayIp) {
+		return false;
+	}
+
+	SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (s == INVALID_SOCKET) {
+		return false;
+	}
+	BOOL reuse = TRUE;
+	setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+	sockaddr_in local = { 0 };
+	local.sin_family = AF_INET;
+	local.sin_addr.s_addr = INADDR_ANY;
+	local.sin_port = htons(nLocalPort);
+	if (bind(s, (sockaddr*)&local, sizeof(local)) != 0) {
+		closesocket(s);
+		return false;
+	}
+
+	sockaddr_in dest = { 0 };
+	dest.sin_family = AF_INET;
+	dest.sin_addr.s_addr = htonl(relayIp);
+	dest.sin_port = htons(relay.m_port);
+
+	char msg[160];
+	int len = snprintf(msg, sizeof(msg), "SF4ERELAY %s %d", token, seat);
+
+	// A few sends so a dropped registration still lands before GGPO
+	// takes the port; the relay keeps re-learning the endpoint from
+	// live traffic anyway.
+	for (int i = 0; i < 4; i++) {
+		sendto(s, msg, len, 0, (sockaddr*)&dest, sizeof(dest));
+	}
+
+	closesocket(s);
+	return true;
+}

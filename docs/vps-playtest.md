@@ -26,15 +26,19 @@ means in practice).
    netsh advfirewall firewall add rule name="sf4e-lobbyd" dir=in action=allow protocol=UDP localport=23450
    netsh advfirewall firewall add rule name="sf4e-lobbyd-probe" dir=in action=allow protocol=UDP localport=23451
    netsh advfirewall firewall add rule name="sf4e-lobbyd-probe2" dir=in action=allow protocol=UDP localport=23452
+   netsh advfirewall firewall add rule name="sf4e-lobbyd-relay" dir=in action=allow protocol=UDP localport=23453
    ```
 
-   Also allow UDP 23450, 23451, and 23452 in the provider's own
+   Also allow UDP 23450 through 23453 in the provider's own
    firewall/security-group settings if it has one (Azure NSG, Vultr
-   firewall, etc.). 23451 and 23452 are the NAT probe echoes: without
-   the first, clients fall back to reporting their local GGPO port and
-   NAT traversal fails more often; without the second, symmetric NATs
-   go undetected and their players get a generic failure instead of
-   "forward your port".
+   firewall, etc.):
+   - 23451/23452 are the NAT probe echoes: without the first, clients
+     fall back to reporting their local GGPO port and NAT traversal
+     fails more often; without the second, symmetric NATs go
+     undetected.
+   - 23453 is the UDP relay: without it, symmetric-NAT and CGNAT
+     players (whose direct handshake can't work) have no fallback and
+     their matches fail.
 3. Create the config files the bundle's launch wrapper reads (in
    `C:\sf4e-lobbyd`):
 

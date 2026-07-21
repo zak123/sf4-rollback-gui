@@ -159,7 +159,106 @@ int SessionServer::Listen(uint16 nPort) {
 			closesocket(probe);
 		}
 	}
+
+	// UDP relay, three ports up. Best-effort: without it, matches that
+	// need relaying simply fail the direct handshake as before.
+	SOCKET relay = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (relay != INVALID_SOCKET) {
+		sockaddr_in bindAddr = { 0 };
+		bindAddr.sin_family = AF_INET;
+		bindAddr.sin_addr.s_addr = INADDR_ANY;
+		bindAddr.sin_port = htons(nPort + 3);
+		u_long nonblock = 1;
+		if (bind(relay, (sockaddr*)&bindAddr, sizeof(bindAddr)) == 0 &&
+			ioctlsocket(relay, FIONBIO, &nonblock) == 0) {
+			_relaySocket = (uintptr_t)relay;
+			_relayPort = nPort + 3;
+			spdlog::info("UDP relay listening on UDP {}", nPort + 3);
+		}
+		else {
+			spdlog::warn("UDP relay could not bind UDP {}; symmetric-NAT matches will fail", nPort + 3);
+			closesocket(relay);
+		}
+	}
 	return 0;
+}
+
+// Cross-forward GGPO datagrams between the two registered endpoints of
+// each match. Registration datagrams ("SF4ERELAY <token> <seat>") teach
+// the relay each side's public endpoint; everything else from a known
+// endpoint is forwarded to its pair.
+void SessionServer::StepRelay() {
+	if ((SOCKET)_relaySocket == INVALID_SOCKET) {
+		return;
+	}
+	uint64_t now = GetTickCount64();
+	for (int n = 0; n < 64; n++) {
+		char buf[2048];
+		sockaddr_in from = { 0 };
+		int fromLen = sizeof(from);
+		int got = recvfrom((SOCKET)_relaySocket, buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
+		if (got <= 0) {
+			break;
+		}
+
+		if (got >= 10 && memcmp(buf, "SF4ERELAY ", 10) == 0) {
+			buf[got < (int)sizeof(buf) ? got : (int)sizeof(buf) - 1] = 0;
+			char token[128] = { 0 };
+			int seat = -1;
+			if (sscanf_s(buf + 10, "%127s %d", token, (unsigned)sizeof(token), &seat) == 2 &&
+				(seat == 0 || seat == 1)) {
+				RelayPair& pair = _relayPairs[token];
+				pair.addr[seat] = from.sin_addr.s_addr;
+				pair.port[seat] = from.sin_port;
+				pair.present[seat] = true;
+				pair.lastSeenMs = now;
+				spdlog::info(
+					"Relay: registered seat {} of match \"{}\" at {}.{}.{}.{}:{}",
+					seat, token,
+					from.sin_addr.S_un.S_un_b.s_b1, from.sin_addr.S_un.S_un_b.s_b2,
+					from.sin_addr.S_un.S_un_b.s_b3, from.sin_addr.S_un.S_un_b.s_b4,
+					(unsigned int)ntohs(from.sin_port)
+				);
+			}
+			continue;
+		}
+
+		// GGPO traffic: find the pair this endpoint belongs to and
+		// forward to the other seat.
+		for (auto iter = _relayPairs.begin(); iter != _relayPairs.end(); iter++) {
+			RelayPair& pair = iter->second;
+			int src = -1;
+			if (pair.present[0] && pair.addr[0] == from.sin_addr.s_addr && pair.port[0] == from.sin_port) {
+				src = 0;
+			}
+			else if (pair.present[1] && pair.addr[1] == from.sin_addr.s_addr && pair.port[1] == from.sin_port) {
+				src = 1;
+			}
+			if (src < 0) {
+				continue;
+			}
+			int dst = src ^ 1;
+			if (pair.present[dst]) {
+				sockaddr_in to = { 0 };
+				to.sin_family = AF_INET;
+				to.sin_addr.s_addr = pair.addr[dst];
+				to.sin_port = pair.port[dst];
+				sendto((SOCKET)_relaySocket, buf, got, 0, (sockaddr*)&to, sizeof(to));
+				pair.lastSeenMs = now;
+			}
+			break;
+		}
+	}
+
+	// Prune idle pairings so the table can't grow without bound.
+	for (auto iter = _relayPairs.begin(); iter != _relayPairs.end();) {
+		if (now - iter->second.lastSeenMs > 5 * 60 * 1000) {
+			iter = _relayPairs.erase(iter);
+		}
+		else {
+			iter++;
+		}
+	}
 }
 
 int SessionServer::Step()
@@ -194,6 +293,8 @@ int SessionServer::Step()
 			}
 		}
 	}
+
+	StepRelay();
 
 	ISteamNetworkingMessage* pIncomingMsgs[SESSION_SERVER_MAX_MESSAGES_PER_POLL] = { 0 };
 	int numMsgs = _interface->ReceiveMessagesOnPollGroup(_pollGroup, pIncomingMsgs, SESSION_SERVER_MAX_MESSAGES_PER_POLL);
@@ -316,6 +417,7 @@ int SessionServer::Step()
 				Peer gamePeer;
 				gamePeer.data = { cid, member.data.name, peerAddrStr, request.port, 0 };
 				gamePeer.lobbyKey = lobby->id.key;
+				gamePeer.natFlags = request.natFlags;
 				peers[conn] = gamePeer;
 				peerIter = peers.find(conn);
 
@@ -959,6 +1061,27 @@ int SessionServer::Step()
 	for (auto iter = registry.lobbies.begin(); iter != registry.lobbies.end(); iter++) {
 		Lobby& lobby = iter->second;
 		if (lobby.dirty) {
+			// Decide direct vs. relay for this match: if either seated
+			// game reported a NAT that can't be traversed directly,
+			// both sides route GGPO through the relay. Needs the relay
+			// socket bound and both seats to be game connections.
+			lobby.match.relayEndpoint.clear();
+			if ((SOCKET)_relaySocket != INVALID_SOCKET && lobby.members.size() >= 2) {
+				bool needsRelay = false;
+				for (int seat = 0; seat < 2; seat++) {
+					auto pIter = peers.find(lobby.members[seat].conn);
+					if (pIter != peers.end() && (pIter->second.natFlags & SessionProtocol::NF_NEEDS_RELAY)) {
+						needsRelay = true;
+					}
+				}
+				if (needsRelay) {
+					std::string ip = _identity.substr(0, _identity.find(':'));
+					if (!ip.empty()) {
+						lobby.match.relayEndpoint = ip + ":" + std::to_string(_relayPort);
+					}
+				}
+			}
+
 			SessionProtocol::SessionDataUpdate updateMsg;
 			updateMsg.lobbyData = lobby.ToLobbyData();
 			updateMsg.matchData = lobby.match;
@@ -1180,6 +1303,11 @@ int SessionServer::Close()
 			_probeSockets[p] = (uintptr_t)~0;
 		}
 	}
+	if ((SOCKET)_relaySocket != INVALID_SOCKET) {
+		closesocket((SOCKET)_relaySocket);
+		_relaySocket = (uintptr_t)~0;
+	}
+	_relayPairs.clear();
 	spdlog::info("Closing connections...");
 	// Close all connections.  We use "linger mode" to ask SteamNetworkingSockets
 	// to flush this out and close gracefully.

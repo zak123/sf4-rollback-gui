@@ -42,6 +42,26 @@ namespace sf4e {
 		// (per-destination mappings). ~0 when unbound.
 		uintptr_t _probeSockets[2] = { (uintptr_t)~0, (uintptr_t)~0 };
 
+		// UDP relay, three ports above the listen port. Games whose NAT
+		// can't be traversed directly register here from their GGPO
+		// socket with the lobby ID as a token, then point GGPO at this
+		// socket; it cross-forwards datagrams between the two
+		// registered endpoints of each match. ~0 when unbound.
+		uintptr_t _relaySocket = (uintptr_t)~0;
+		uint16_t _relayPort = 0;
+
+		// One relay pairing per match token (the lobby ID string). Each
+		// side's public endpoint is learned from its registration
+		// datagram; packets from one endpoint forward to the other.
+		struct RelayPair {
+			uint32_t addr[2] = { 0, 0 };   // network-order IPv4
+			uint16_t port[2] = { 0, 0 };   // network-order
+			bool present[2] = { false, false };
+			uint64_t lastSeenMs = 0;
+		};
+		std::map<std::string, RelayPair> _relayPairs;
+		void StepRelay();
+
 		// The registry key of the default lobby, if this server was
 		// constructed with one. Empty in dedicated mode. Tracked
 		// explicitly- a user-created lobby can coincidentally hold any
@@ -102,6 +122,11 @@ namespace sf4e {
 		typedef struct Peer {
 			SessionProtocol::MemberData data;
 			std::string lobbyKey;
+
+			// NAT status this peer's game reported (SessionProtocol
+			// NatFlag bits). Drives whether a match it seats in routes
+			// through the relay.
+			uint32_t natFlags = 0;
 
 			// Chat rate limiting: a ring of the timestamps of this
 			// peer's most recent sends. A send is dropped when the

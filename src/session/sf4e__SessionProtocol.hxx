@@ -85,6 +85,13 @@ namespace sf4e {
 			Dimps::GameEvents::VsMode::ConfirmedCharaConditions chara[2];
 			int64_t stageID;
 			DWORD rngSeed;
+
+			// "ip:port" of the UDP relay both games must route GGPO
+			// through, set by the server when a seat's NAT can't be
+			// traversed directly. Empty means direct P2P (the fast
+			// path). The shared relay token is the lobby ID, which both
+			// games already hold.
+			std::string relayEndpoint;
 		};
 
 		enum MessageType {
@@ -241,6 +248,17 @@ namespace sf4e {
 			// until match handoff lands; carried now so the message shape
 			// is stable.
 			std::string handoff;
+
+			// NAT status this seat's game observed via the probe. Bit 0
+			// (NF_NEEDS_RELAY) = a direct connection is unlikely
+			// (symmetric NAT, or the probe got no reply); the server
+			// routes the match through the relay when either seat sets
+			// it.
+			uint32_t natFlags = 0;
+		};
+
+		enum NatFlag {
+			NF_NEEDS_RELAY = 1,
 		};
 
 		struct LobbyCreate {
@@ -480,7 +498,7 @@ namespace sf4e {
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MemberData, connId, name, ip, port);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyData, id, name, editionSelect, roundCount, roundTime, members);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed);
+		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed, relayEndpoint);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionHelloMsg, type);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionHelloResp, type, cid);
@@ -498,6 +516,7 @@ namespace sf4e {
 				{"port", r.port},
 				{"lobby", r.lobby},
 				{"handoff", r.handoff},
+				{"natFlags", r.natFlags},
 			};
 		}
 
@@ -508,6 +527,7 @@ namespace sf4e {
 			j.at("port").get_to(r.port);
 			r.lobby = j.value("lobby", LobbyID{ "", "" });
 			r.handoff = j.value("handoff", std::string());
+			r.natFlags = j.value("natFlags", (uint32_t)0);
 		}
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LobbyCreate, type, name, editionSelect, roundCount, roundTime);

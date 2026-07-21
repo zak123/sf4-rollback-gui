@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include <winsock2.h>
 #include <windows.h>
 
 #include <nlohmann/json.hpp>
@@ -257,6 +258,42 @@ int main(int argc, char** argv) {
 					"the dual-destination probe sees a consistent mapping on loopback"
 				);
 				sf4e::Net::Net_ProbeClose(probe);
+			}
+
+			// Relay cross-forward: two fake game sockets register with
+			// the relay (port TEST_PORT+3) under one token, then a
+			// datagram from one must arrive at the other.
+			{
+				SOCKET g0 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+				SOCKET g1 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+				sockaddr_in any = { 0 };
+				any.sin_family = AF_INET;
+				any.sin_addr.s_addr = htonl(0x7f000001);
+				bind(g0, (sockaddr*)&any, sizeof(any));
+				bind(g1, (sockaddr*)&any, sizeof(any));
+				DWORD to = 500;
+				setsockopt(g1, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
+
+				sockaddr_in relayAddr = { 0 };
+				relayAddr.sin_family = AF_INET;
+				relayAddr.sin_addr.s_addr = htonl(0x7f000001);
+				relayAddr.sin_port = htons(TEST_PORT + 3);
+				const char* reg0 = "SF4ERELAY smoke:1 0";
+				const char* reg1 = "SF4ERELAY smoke:1 1";
+				sendto(g0, reg0, (int)strlen(reg0), 0, (sockaddr*)&relayAddr, sizeof(relayAddr));
+				sendto(g1, reg1, (int)strlen(reg1), 0, (sockaddr*)&relayAddr, sizeof(relayAddr));
+				PumpUntil(server, 1000, []() { return false; });
+				const char* payload = "GGPO-ish payload";
+				sendto(g0, payload, (int)strlen(payload), 0, (sockaddr*)&relayAddr, sizeof(relayAddr));
+				PumpUntil(server, 1000, []() { return false; });
+				char rbuf[64] = { 0 };
+				int rgot = recv(g1, rbuf, sizeof(rbuf) - 1, 0);
+				CHECK(
+					rgot == (int)strlen(payload) && memcmp(rbuf, payload, rgot) == 0,
+					"the relay cross-forwards a datagram between paired seats"
+				);
+				closesocket(g0);
+				closesocket(g1);
 			}
 
 			TestClientCtx* alice = MakeClient("alice", 24001);
