@@ -136,22 +136,26 @@ int SessionServer::Listen(uint16 nPort) {
 	}
 	spdlog::info("Server listening on port {}", nPort);
 
-	// NAT probe echo, one port up. Best-effort: without it, clients
-	// fall back to reporting their local GGPO port as before.
-	SOCKET probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (probe != INVALID_SOCKET) {
+	// NAT probe echoes, one and two ports up. Best-effort: without the
+	// first, clients fall back to reporting their local GGPO port;
+	// without the second, symmetric NATs go undetected.
+	for (int i = 0; i < 2; i++) {
+		SOCKET probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		if (probe == INVALID_SOCKET) {
+			continue;
+		}
 		sockaddr_in bindAddr = { 0 };
 		bindAddr.sin_family = AF_INET;
 		bindAddr.sin_addr.s_addr = INADDR_ANY;
-		bindAddr.sin_port = htons(nPort + 1);
+		bindAddr.sin_port = htons(nPort + 1 + i);
 		u_long nonblock = 1;
 		if (bind(probe, (sockaddr*)&bindAddr, sizeof(bindAddr)) == 0 &&
 			ioctlsocket(probe, FIONBIO, &nonblock) == 0) {
-			_probeSocket = (uintptr_t)probe;
-			spdlog::info("NAT probe echo listening on UDP {}", nPort + 1);
+			_probeSockets[i] = (uintptr_t)probe;
+			spdlog::info("NAT probe echo listening on UDP {}", nPort + 1 + i);
 		}
 		else {
-			spdlog::warn("NAT probe echo could not bind UDP {}; clients will report local ports", nPort + 1);
+			spdlog::warn("NAT probe echo could not bind UDP {}", nPort + 1 + i);
 			closesocket(probe);
 		}
 	}
@@ -162,12 +166,15 @@ int SessionServer::Step()
 {
 	// Answer NAT probes with the sender's observed address- the
 	// endpoint a peer must use to reach that client's GGPO socket.
-	if ((SOCKET)_probeSocket != INVALID_SOCKET) {
+	for (int p = 0; p < 2; p++) {
+		if ((SOCKET)_probeSockets[p] == INVALID_SOCKET) {
+			continue;
+		}
 		for (int n = 0; n < 8; n++) {
 			char buf[64];
 			sockaddr_in from = { 0 };
 			int fromLen = sizeof(from);
-			int got = recvfrom((SOCKET)_probeSocket, buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
+			int got = recvfrom((SOCKET)_probeSockets[p], buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
 			if (got <= 0) {
 				break;
 			}
@@ -183,7 +190,7 @@ int SessionServer::Step()
 					from.sin_addr.S_un.S_un_b.s_b4,
 					(unsigned int)ntohs(from.sin_port)
 				);
-				sendto((SOCKET)_probeSocket, reply, (int)strlen(reply), 0, (sockaddr*)&from, fromLen);
+				sendto((SOCKET)_probeSockets[p], reply, (int)strlen(reply), 0, (sockaddr*)&from, fromLen);
 			}
 		}
 	}
@@ -1167,9 +1174,11 @@ void SessionServer::RemoveFromLobby(HSteamNetConnection conn) {
 
 int SessionServer::Close()
 {
-	if ((SOCKET)_probeSocket != INVALID_SOCKET) {
-		closesocket((SOCKET)_probeSocket);
-		_probeSocket = (uintptr_t)~0;
+	for (int p = 0; p < 2; p++) {
+		if ((SOCKET)_probeSockets[p] != INVALID_SOCKET) {
+			closesocket((SOCKET)_probeSockets[p]);
+			_probeSockets[p] = (uintptr_t)~0;
+		}
 	}
 	spdlog::info("Closing connections...");
 	// Close all connections.  We use "linger mode" to ask SteamNetworkingSockets

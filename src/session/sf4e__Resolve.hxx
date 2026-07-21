@@ -22,6 +22,15 @@ namespace sf4e {
 			uint16_t publicPort = 0;
 			char publicAddr[48] = { 0 };
 			bool ok = false;
+
+			// Symmetric detection: the same socket probes a second
+			// echo port. A NAT that maps the same local port to
+			// DIFFERENT public ports per destination is symmetric-
+			// peers can't reach the probed endpoint, and only a port
+			// forward (or a relay) will connect it.
+			bool symmetricKnown = false;
+			bool symmetric = false;
+			uint16_t publicPort2 = 0;
 		};
 
 		// Bind nLocalPort and ask the server's echo what public

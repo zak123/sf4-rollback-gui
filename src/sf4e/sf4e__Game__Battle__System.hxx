@@ -69,6 +69,12 @@ namespace sf4e {
 				// inputs for both sides.
 				static bool bSynctestSession;
 
+				// Set when the NAT probe detected per-destination
+				// mappings (symmetric NAT): the handshake watchdog's
+				// abort message then names the fix (port forwarding)
+				// instead of a generic NAT warning.
+				static bool bNatSymmetricHint;
+
 				// Armed at battle-task registration, consumed by
 				// VsBattle::HasInitialized: the sync-test backend saves
 				// frame 0 in its constructor, so the session must not

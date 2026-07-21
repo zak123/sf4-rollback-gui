@@ -35,10 +35,12 @@ namespace sf4e {
 		HSteamNetPollGroup _pollGroup;
 		ISteamNetworkingSockets* _interface;
 
-		// Raw UDP echo one port above the listen port: clients probe
-		// it from their GGPO socket to learn the public endpoint their
-		// NAT maps that port to. ~0 when unbound.
-		uintptr_t _probeSocket = (uintptr_t)~0;
+		// Raw UDP echoes one and two ports above the listen port:
+		// clients probe both from their GGPO socket- the first learns
+		// the public endpoint their NAT maps that port to, and a
+		// differing answer from the second exposes a symmetric NAT
+		// (per-destination mappings). ~0 when unbound.
+		uintptr_t _probeSockets[2] = { (uintptr_t)~0, (uintptr_t)~0 };
 
 		// The registry key of the default lobby, if this server was
 		// constructed with one. Empty in dedicated mode. Tracked

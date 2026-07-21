@@ -102,6 +102,28 @@ bool sf4e::Net::Net_ProbeGgpoPort(const SteamNetworkingIPAddr& server, uint16_t 
 		return false;
 	}
 
+	// Second destination, same socket: a differing observed port means
+	// the NAT maps per destination (symmetric)- the endpoint above is
+	// then only valid toward this server, not toward a peer. No reply
+	// (older server, unopened firewall port) leaves it unknown.
+	dest.sin_port = htons(server.m_port + 2);
+	for (int attempt = 0; attempt < 2 && !out.symmetricKnown; attempt++) {
+		sendto(s, PROBE_MAGIC, sizeof(PROBE_MAGIC) - 1, 0, (sockaddr*)&dest, sizeof(dest));
+		sockaddr_in from = { 0 };
+		int fromLen = sizeof(from);
+		int got = recvfrom(s, reply, sizeof(reply) - 1, 0, (sockaddr*)&from, &fromLen);
+		if (got <= (int)sizeof(PROBE_MAGIC) - 1) {
+			continue;
+		}
+		reply[got] = 0;
+		unsigned int a, b, c, d, p;
+		if (sscanf_s(reply, "SF4EPROBE %u.%u.%u.%u:%u", &a, &b, &c, &d, &p) == 5 && p > 0 && p < 65536) {
+			out.publicPort2 = (uint16_t)p;
+			out.symmetricKnown = true;
+			out.symmetric = out.publicPort2 != out.publicPort;
+		}
+	}
+
 	// Keepalive phase: non-blocking so per-frame ticks never stall.
 	u_long nonblock = 1;
 	ioctlsocket(s, FIONBIO, &nonblock);

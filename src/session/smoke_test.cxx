@@ -252,6 +252,10 @@ int main(int argc, char** argv) {
 					probeOk && probe.ok && probe.publicPort == 24990,
 					"the NAT probe learns its endpoint through the server echo"
 				);
+				CHECK(
+					probe.symmetricKnown && !probe.symmetric && probe.publicPort2 == 24990,
+					"the dual-destination probe sees a consistent mapping on loopback"
+				);
 				sf4e::Net::Net_ProbeClose(probe);
 			}
 

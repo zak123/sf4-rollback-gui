@@ -73,6 +73,7 @@ uint64_t fSystem::nGgpoWaitStartMs = 0;
 bool fSystem::bGgpoEverRan = false;
 bool fSystem::bGgpoConnectionInterrupted = false;
 bool fSystem::bSynctestSession = false;
+bool fSystem::bNatSymmetricHint = false;
 bool fSystem::bSynctestPending = false;
 int fSystem::nSynctestPendingDistance = 1;
 DWORD fSystem::nSynctestPendingSeed = 0;
@@ -437,11 +438,19 @@ void fSystem::BattleUpdate() {
             }
             else if (now - nGgpoWaitStartMs > GGPO_SYNC_TIMEOUT_MS) {
                 sf4e::UserApp::AbortNetplay(
-                    "Could not reach the opponent to start the match. "
-                    "One side's network may be blocking game traffic "
-                    "(NAT/firewall).\n\n"
-                    "The game will now close- your lobby app will put "
-                    "you back in the lobby."
+                    bNatSymmetricHint
+                    ? "Could not reach the opponent to start the match.\n\n"
+                      "This machine is behind a symmetric NAT, which "
+                      "usually cannot connect directly. Forwarding the "
+                      "GGPO UDP port (23457 by default) on the router "
+                      "fixes it.\n\n"
+                      "The game will now close- your lobby app will put "
+                      "you back in the lobby."
+                    : "Could not reach the opponent to start the match. "
+                      "One side's network may be blocking game traffic "
+                      "(NAT/firewall).\n\n"
+                      "The game will now close- your lobby app will put "
+                      "you back in the lobby."
                 );
             }
         }
@@ -764,6 +773,14 @@ void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int fra
 
     int localPlayerIdx = -1;
     for (int i = 0; i < 2; i++) {
+        if (inPlayers[i].type == GGPO_PLAYERTYPE_REMOTE) {
+            // The single most important diagnostic for a failed
+            // handshake: what this side actually fired at.
+            spdlog::info(
+                "GGPO: firing at peer {} at {}:{}",
+                i, inPlayers[i].u.remote.ip_address, inPlayers[i].u.remote.port
+            );
+        }
         players[i].type = inPlayers[i].type;
         result = ggpo_add_player(ggpo, inPlayers + i, &players[i].handle);
         if (!GGPO_SUCCEEDED(result)) {

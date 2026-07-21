@@ -420,6 +420,24 @@ void fUserApp::StartSession(
             "NAT probe: public endpoint {} for local GGPO port {}",
             s_natProbe.publicAddr, port
         );
+        if (s_natProbe.symmetricKnown && s_natProbe.symmetric) {
+            // The probed endpoint is only valid toward the server-
+            // peers will see a different mapping. Warn here and in the
+            // handshake watchdog's abort message.
+            fSystem::bNatSymmetricHint = true;
+            spdlog::warn(
+                "NAT probe: SYMMETRIC NAT- the second destination observed port {} "
+                "instead. Direct connections will usually fail; forwarding UDP "
+                "port {} on the router fixes this machine.",
+                s_natProbe.publicPort2, port
+            );
+        }
+        else if (s_natProbe.symmetricKnown) {
+            spdlog::info("NAT probe: mapping is consistent across destinations (punchable)");
+        }
+        else {
+            spdlog::info("NAT probe: symmetric check unavailable (no second echo)");
+        }
     }
     else {
         spdlog::info("NAT probe: no reply; reporting local GGPO port {}", port);
