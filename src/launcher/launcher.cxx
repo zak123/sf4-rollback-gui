@@ -331,6 +331,11 @@ int WINAPI wWinMain(
 	app.add_option("--join-name", joinName, "Display name matching the seat being taken over");
 	app.add_option("--ggpo-port", nGgpoPort, "Local UDP port for GGPO traffic")->check(CLI::Range(1024, 65535));
 	app.add_option("--delay", nDelay, "GGPO input delay in frames")->check(CLI::Range(0, 10));
+	app.add_flag("--synctest", args.bSynctest, "Determinism soak: run a local battle under GGPO's sync-test backend, which rolls back and re-simulates every frame and compares state checksums");
+	int nSynctestFrames = 1;
+	int nSynctestInputEvery = 4;
+	app.add_option("--synctest-frames", nSynctestFrames, "Sync-test rollback depth in frames")->check(CLI::Range(1, 8));
+	app.add_option("--synctest-input-every", nSynctestInputEvery, "Reroll random inputs every N frames during synctest; 0 reads real controllers instead")->check(CLI::Range(0, 60));
 	int argc;
 	LPWSTR* argv = CommandLineToArgvW(
 		// Intentionally do _not_ use lpCmdLine here. Windows removes
@@ -357,6 +362,11 @@ int WINAPI wWinMain(
 		StringCchCopyA(args.szName, sizeof(args.szName), joinName.c_str());
 		args.nGgpoPort = (uint16_t)nGgpoPort;
 		args.nDelay = (uint8_t)nDelay;
+	}
+
+	if (args.bSynctest) {
+		args.nSynctestDistance = (uint8_t)nSynctestFrames;
+		args.nSynctestInputEvery = (uint8_t)nSynctestInputEvery;
 	}
 
 	// Compute the path to the sidecar DLL based on the launcher's directory.

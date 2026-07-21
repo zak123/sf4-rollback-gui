@@ -36,6 +36,7 @@ using fSystem = sf4e::Game::Battle::System;
 
 int (*fMainMenu::OnModeSelectedOverride)(int mode);
 int fMainMenu::bOverrideItemObserverState = -1;
+bool fMainMenu::bAliveSeen = false;
 void (*fVsBattle::OnTasksRegistered)() = nullptr;
 void (*fVsPreBattle::OnTasksRegistered)() = nullptr;
 
@@ -145,6 +146,7 @@ void fMainMenu::Install() {
 
 
 int fMainMenu::GetItemObserverState() {
+	bAliveSeen = true;
 	if (bOverrideItemObserverState != -1) {
 		return bOverrideItemObserverState;
 	}
@@ -231,6 +233,15 @@ int fVsBattle::HasInitialized() {
 	// delay.
 	if (bBlockInitialization) {
 		return 0;
+	}
+	if (fSystem::bSynctestPending) {
+		// The battle is fully built- now the sync-test backend's
+		// synchronous frame-0 save captures real state.
+		fSystem::bSynctestPending = false;
+		fSystem::StartSynctest(
+			fSystem::nSynctestPendingDistance,
+			fSystem::nSynctestPendingSeed
+		);
 	}
 	if (fUserApp::netplay) {
 		if (!bSessionSentLoaded) {

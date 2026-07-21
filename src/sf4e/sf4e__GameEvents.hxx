@@ -17,6 +17,12 @@ namespace sf4e {
 
 			static int (*OnModeSelectedOverride)(int mode);
 			static int bOverrideItemObserverState;
+
+			// Set the first time the menu's item observer runs- a
+			// method on a live menu object, so once true the app and
+			// event tree provably exist. Gates code (ex. the synctest
+			// drive) that must not touch game globals during boot.
+			static bool bAliveSeen;
 			static void Install();
 		};
 

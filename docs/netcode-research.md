@@ -73,8 +73,8 @@ Still open:
 
 | # | Work | Why | Needs live game? |
 |---|------|-----|------------------|
-| P1 | **Wire sync-test mode**: real state checksum (ex. Fletcher32 over the memento buffers at save time) + a `--synctest` launcher flag mapping to `ggpo_start_synctest` | The systematic uncaptured-state finder; runs solo on one machine in any offline mode | Build: no. Run: yes — but solo, no opponent needed |
-| P2 | Replace the desync and pool-exhaustion message boxes with the clean-abort path | Stops one failure from manufacturing a second; unfreezes the sim thread | No |
+| P1 | **DONE — Wire sync-test mode**: real state checksum (Fletcher32 over each key's recorded memento slots + sound state + flow globals) + a `--synctest` launcher flag mapping to `ggpo_start_synctest` | The systematic uncaptured-state finder; runs solo on one machine in any offline mode | Build: no. Run: yes — but solo, no opponent needed |
+| P2 | DONE — Replace the desync and pool-exhaustion message boxes with the clean-abort path | Stops one failure from manufacturing a second; unfreezes the sim thread | No |
 | P3 | Reuse the P1 checksum in the periodic session exchange (full-state checksum at 1 Hz instead of the two-character sample) | Detection catches *any* divergence, not just character state | Validation only |
 | P4 | Smooth out TIMESYNC pacing | Removes hitches; avoids stall-reads-as-hang | Validation only |
 | P5 | Detect the "Smooth" frame-rate option in-game and warn in the overlay | Converts a known footgun (#13) into a visible warning | Yes — finding the option flag is live RE |
@@ -85,6 +85,26 @@ mode and a few matches' worth of inputs, every remaining desync report
 from the playtest points at *netcode*, not state capture — and P3 then
 catches real-world divergence within a second with an exact frame
 number.
+
+### Using the synctest (P1, implemented)
+
+    Launcher.exe --synctest [--synctest-frames N] [--synctest-input-every N]
+
+Boots the game, and once past the title screen drives itself into a
+local Ryu-vs-Ken battle (7 rounds, 99s, fixed seed) running under
+GGPO's sync-test backend: every frame is rolled back
+`--synctest-frames` deep (default 1) and re-simulated, and full-state
+checksums compared. Both sides feed randomized inputs rerolled every
+`--synctest-input-every` frames (default 4); pass 0 to read real
+controllers and play the soak by hand instead.
+
+Watch `%APPDATA%\sf4e\logs\sf4e.log`:
+
+- `Synctest: N frames verified clean` every 600 frames = healthy.
+- `SYNCTEST DIVERGENCE` = a determinism break was caught. Two state
+  dumps follow (original vs. re-simulated); the first key whose
+  checksum differs between them names the subsystem that diverged.
+  Runs use a fixed seed and fixed picks, so a divergence reproduces.
 
 ## What requires the game executable
 

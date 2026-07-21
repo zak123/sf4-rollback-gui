@@ -25,6 +25,14 @@ namespace sf4e {
 		char szName[32] = { 0 };
 		uint16_t nGgpoPort = 23457;
 		uint8_t nDelay = 1;
+
+		// Synctest, set by --synctest: run a local battle under GGPO's
+		// sync-test backend instead of a network session- every frame
+		// is rolled back and re-simulated, and state checksums are
+		// compared to catch determinism breaks on one machine.
+		bool bSynctest = false;
+		uint8_t nSynctestDistance = 1;
+		uint8_t nSynctestInputEvery = 4;
 	} Args;
 
 	typedef struct Payload {

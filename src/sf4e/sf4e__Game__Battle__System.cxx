@@ -72,6 +72,14 @@ int fSystem::nRandomizeLocalInputsEveryXFramesInGGPO = 0;
 uint64_t fSystem::nGgpoWaitStartMs = 0;
 bool fSystem::bGgpoEverRan = false;
 bool fSystem::bGgpoConnectionInterrupted = false;
+bool fSystem::bSynctestSession = false;
+bool fSystem::bSynctestPending = false;
+int fSystem::nSynctestPendingDistance = 1;
+DWORD fSystem::nSynctestPendingSeed = 0;
+
+// Frames verified by the running sync-test session, for progress logs
+// and the end-of-run summary.
+static int s_nSynctestFramesVerified = 0;
 
 // What bUpdateAllowed held before a connection interruption paused the
 // simulation, restored when the connection resumes.
@@ -88,6 +96,127 @@ fSystem::PlayerConnectionInfo fSystem::players[MAX_SF4E_PROTOCOL_USERS];
 fSystem::SaveState fSystem::saveStates[NUM_SAVE_STATES];
 
 rKey::MementoID GGPO_MEMENTO_ID = { 1, 1 };
+
+// Byte-wise Fletcher-32: cheap, order-sensitive, and enough to catch
+// any state divergence. The block size keeps the 32-bit accumulators
+// from overflowing before reduction.
+static void Fletcher32(uint32_t& sum1, uint32_t& sum2, const void* data, size_t len) {
+    const uint8_t* p = (const uint8_t*)data;
+    while (len > 0) {
+        size_t block = len > 5802 ? 5802 : len;
+        len -= block;
+        while (block--) {
+            sum1 += *p++;
+            sum2 += sum1;
+        }
+        sum1 %= 65535;
+        sum2 %= 65535;
+    }
+}
+
+// Hash the bytes a memento key's saved copy owns. Keys allocate
+// numMementos equal slots; only the slots recorded so far hold
+// meaningful data- allocation slack past them is heap garbage and
+// would false-positive.
+static uint32_t ChecksumMementoKey(const rKey* key) {
+    if (!key->mementos || key->numMementos <= 0 || key->sizeAllocated <= 0) {
+        return 0;
+    }
+    int slotSize = key->sizeAllocated / key->numMementos;
+    int used = key->nextMementoIndex;
+    if (used < 0) {
+        used = 0;
+    }
+    if (used > key->numMementos) {
+        used = key->numMementos;
+    }
+    uint32_t s1 = 0, s2 = 0;
+    Fletcher32(s1, s2, key->mementos, (size_t)slotSize * (size_t)used);
+    return (s2 << 16) | s1;
+}
+
+// Full-state checksum for the sync-test session. Real matches skip
+// this- hashing every save on every frame is too expensive there.
+// outParts, when given, receives one hash per component in a stable
+// order (memento keys, then sound entries, then flow globals) so a
+// diverging component can be pinpointed.
+static int ChecksumSaveState(const fSystem::SaveState* s, std::vector<uint32_t>* outParts) {
+    uint32_t s1 = 0, s2 = 0;
+    for (auto iter = s->keys.begin(); iter != s->keys.end(); iter++) {
+        uint32_t key = ChecksumMementoKey(&iter->second);
+        if (outParts) {
+            outParts->push_back(key);
+        }
+        Fletcher32(s1, s2, &key, sizeof(key));
+    }
+    // The sound maps (criPlayerState/managerState) are deliberately NOT
+    // hashed: they capture what the audio hardware is currently playing
+    // so sounds can resume after a rollback- wall-clock state, not
+    // deterministic simulation state. A first synctest run confirmed
+    // they differ between a frame and its re-simulation while every
+    // memento key matched.
+    uint32_t g1 = 0, g2 = 0;
+    Fletcher32(g1, g2, &s->d, sizeof(s->d));
+    uint32_t globals = (g2 << 16) | g1;
+    if (outParts) {
+        outParts->push_back(globals);
+    }
+    Fletcher32(s1, s2, &globals, sizeof(globals));
+    return (int)((s2 << 16) | s1);
+}
+
+// Per-frame component hashes recorded during a sync-test run. The
+// second save of a frame is the rollback re-simulation; comparing it
+// against the first reports exactly which components diverged. This
+// runs before GGPO's own checksum assert ends the run, and doesn't
+// depend on GGPO's buffer lifetimes (which made the log_game_state
+// dump unreliable).
+static std::map<int, std::vector<uint32_t>> s_synctestFrameHashes;
+
+static void SynctestCompareFrame(int frame, const fSystem::SaveState* state, std::vector<uint32_t>& parts) {
+    auto prior = s_synctestFrameHashes.find(frame);
+    if (prior == s_synctestFrameHashes.end()) {
+        s_synctestFrameHashes[frame] = parts;
+        // A bounded window is plenty- comparisons happen within the
+        // rollback distance of the original save.
+        while (s_synctestFrameHashes.size() > 64) {
+            s_synctestFrameHashes.erase(s_synctestFrameHashes.begin());
+        }
+        return;
+    }
+
+    if (prior->second != parts) {
+        size_t nKeys = state->keys.size();
+        spdlog::error("SYNCTEST DIVERGENCE at frame {}: re-simulation differs from the original run", frame);
+        size_t n = parts.size() < prior->second.size() ? parts.size() : prior->second.size();
+        for (size_t k = 0; k < n; k++) {
+            if (prior->second[k] == parts[k]) {
+                continue;
+            }
+            if (k < nKeys) {
+                spdlog::error(
+                    "  key {:3} (mementoable {:08x}): original {:08x} resim {:08x}",
+                    k,
+                    (uint32_t)(uintptr_t)state->keys[k].second.mementoableObject,
+                    prior->second[k],
+                    parts[k]
+                );
+            }
+            else {
+                spdlog::error(
+                    "  part {:3} (flow globals): original {:08x} resim {:08x}",
+                    k,
+                    prior->second[k],
+                    parts[k]
+                );
+            }
+        }
+        if (parts.size() != prior->second.size()) {
+            spdlog::error("  component count differs: original {} resim {}", prior->second.size(), parts.size());
+        }
+    }
+    s_synctestFrameHashes.erase(prior);
+}
 
 bool fSystem::extendedLoadRequest = false;
 bool fSystem::extendedSaveRequest = false;
@@ -257,7 +386,7 @@ void fSystem::BattleUpdate() {
     rPadSystem* p = rPadSystem::staticMethods.GetSingleton();
     rPadSystem::__publicMethods& padMethods = rPadSystem::publicMethods;
     static int nLastRandomInputFrame = -1;
-    static fPadSystem::Inputs randomInputs = { 0, 0 };
+    static fPadSystem::Inputs randomInputs[2] = { { 0, 0 }, { 0, 0 } };
 
     if (!bUpdateAllowed) {
         // If the battle wants to leave (peer disconnected, match
@@ -307,16 +436,21 @@ void fSystem::BattleUpdate() {
                             nLastRandomInputFrame < 0 ||
                             (currentFrame - nLastRandomInputFrame) > nRandomizeLocalInputsEveryXFramesInGGPO
                         ) {
-                            randomInputs = { localRand(), localRand() };
+                            randomInputs[0] = { localRand(), localRand() };
+                            randomInputs[1] = { localRand(), localRand() };
                             nLastRandomInputFrame = currentFrame;
                         }
-                        inputs = randomInputs;
+                        inputs = randomInputs[i];
                     }
                     else {
                         inputs = { (p->*padMethods.GetButtons_MappedOn)(i), (p->*padMethods.GetButtons_RawOn)(i) };
                     }
                     result = ggpo_add_local_input(ggpo, players[i].handle, &inputs, sizeof(fPadSystem::Inputs));
-                    break;
+                    // A sync-test session drives both sides locally; a
+                    // real match has exactly one local player.
+                    if (!bSynctestSession) {
+                        break;
+                    }
                 }
             }
         }
@@ -343,6 +477,9 @@ void fSystem::BattleUpdate() {
                         fSoundPlayerManager::SyncState();
                     }
                     CaptureSnapshot(_this);
+                    if (bSynctestSession && (++s_nSynctestFramesVerified % 600) == 0) {
+                        spdlog::info("Synctest: {} frames verified clean", s_nSynctestFramesVerified);
+                    }
                 }
             }
         }
@@ -375,6 +512,14 @@ void fSystem::CloseBattle() {
         ggpo_close_session(ggpo);
         ggpo = nullptr;
     }
+    if (bSynctestSession) {
+        spdlog::info(
+            "Synctest ended: {} frames verified without divergence",
+            s_nSynctestFramesVerified
+        );
+        bSynctestSession = false;
+        s_synctestFrameHashes.clear();
+    }
     nGgpoWaitStartMs = 0;
     bGgpoEverRan = false;
     bGgpoConnectionInterrupted = false;
@@ -393,6 +538,14 @@ void fSystem::CloseBattle() {
 }
 
 void fSystem::OnBattleFlow_BattleStart(System* s) {
+    if (bSynctestPending) {
+        // Late, reliable start point: the battle flow starting means
+        // the battle is fully built, safely after the loading screen.
+        // (VsBattle::HasInitialized also consumes the pending start,
+        // but was not observed to run in the synctest drive's flow.)
+        bSynctestPending = false;
+        StartSynctest(nSynctestPendingDistance, nSynctestPendingSeed);
+    }
     if (nNextBattleStartFlowTarget > -1) {
         rSystem::staticMethods.SetBattleFlow(s, nNextBattleStartFlowTarget);
         nNextBattleStartFlowTarget = -1;
@@ -671,6 +824,73 @@ void fSystem::StartSpectating(unsigned short localport, int num_players, char* h
     fVsBattle::nextMatchRandomSeed = rngSeed;
 }
 
+void fSystem::StartSynctest(int nDistance, DWORD rngSeed) {
+    GGPOSessionCallbacks cb = { 0 };
+    cb.begin_game = ggpo_begin_game_callback;
+    cb.advance_frame = ggpo_advance_frame_callback;
+    cb.load_game_state = ggpo_load_game_state_callback;
+    cb.save_game_state = ggpo_save_game_state_callback;
+    cb.free_buffer = ggpo_free_buffer;
+    cb.on_event = ggpo_on_event_callback;
+    cb.log_game_state = ggpo_log_game_state;
+
+    bSynctestSession = true;
+    s_nSynctestFramesVerified = 0;
+    s_synctestFrameHashes.clear();
+    GGPOErrorCode result = ggpo_start_synctest(
+        &ggpo,
+        &cb,
+        "sf4e",
+        2,
+        sizeof(fPadSystem::Inputs),
+        nDistance
+    );
+    if (result != GGPO_OK) {
+        spdlog::error("GGPO synctest session could not start: {}", (int)result);
+        sf4e::UserApp::AbortNetplay(
+            "The synctest session could not start; see the sf4e log."
+        );
+        return;
+    }
+
+    for (int i = 0; i < 2; i++) {
+        GGPOPlayer p = { 0 };
+        p.size = sizeof(GGPOPlayer);
+        p.type = GGPO_PLAYERTYPE_LOCAL;
+        p.player_num = i + 1;
+        players[i].type = GGPO_PLAYERTYPE_LOCAL;
+        result = ggpo_add_player(ggpo, &p, &players[i].handle);
+        if (!GGPO_SUCCEEDED(result)) {
+            spdlog::error("Synctest could not add player {}: {}", i, (int)result);
+        }
+    }
+    localPlayerHandle = players[0].handle;
+
+    // Randomized inputs let the soak explore state without a player at
+    // the controls; zero from the launcher means "read real pads".
+    if (nRandomizeLocalInputsEveryXFramesInGGPO == 0 && sf4e::args.nSynctestInputEvery != 0) {
+        nRandomizeLocalInputsEveryXFramesInGGPO = sf4e::args.nSynctestInputEvery;
+    }
+
+    spdlog::info(
+        "Synctest session up: rollback depth {}, inputs rerolled every {} frames, seed {:#010x}",
+        nDistance,
+        nRandomizeLocalInputsEveryXFramesInGGPO,
+        rngSeed
+    );
+
+    nNextBattleStartFlowTarget = BF__MATCH_START;
+    bUpdateAllowed = false;
+    nGgpoWaitStartMs = 0;
+    bGgpoEverRan = false;
+    bGgpoConnectionInterrupted = false;
+    // A finished synctest battle has nothing to return to- terminate to
+    // the title screen. (No netplay session, so no rematch hold.)
+    fVsBattle::bTerminateOnNextLeftBattle = true;
+    fVsBattle::bOverrideNextRandomSeed = true;
+    fVsBattle::nextMatchRandomSeed = rngSeed;
+}
+
 bool fSystem::ggpo_begin_game_callback(const char*)
 {
     return true;
@@ -717,7 +937,7 @@ bool fSystem::ggpo_load_game_state_callback(unsigned char* buffer, int len)
     return true;
 }
 
-bool fSystem::ggpo_save_game_state_callback(unsigned char** buffer, int* len, int* checksum, int)
+bool fSystem::ggpo_save_game_state_callback(unsigned char** buffer, int* len, int* checksum, int frame)
 {
     // No GGPO callback allocates data, then hands ownership to GGPO-
     // sf4e preallocates and manages all its savestates, and the memory
@@ -736,6 +956,14 @@ bool fSystem::ggpo_save_game_state_callback(unsigned char** buffer, int* len, in
         SaveState::Save(&saveStates[i]);
         *buffer = (unsigned char*)&saveStates[i];
         *checksum = 0;
+        if (bSynctestSession) {
+            // The real checksum is what lets the sync-test backend
+            // detect a divergent re-simulation; the shadow compare
+            // reports exactly which components diverged.
+            std::vector<uint32_t> parts;
+            *checksum = ChecksumSaveState(&saveStates[i], &parts);
+            SynctestCompareFrame(frame, &saveStates[i], parts);
+        }
 
         return true;
     }
@@ -751,6 +979,40 @@ bool fSystem::ggpo_save_game_state_callback(unsigned char** buffer, int* len, in
 
 bool fSystem::ggpo_log_game_state(char* filename, unsigned char* buffer, int)
 {
+    // The sync-test backend asks for state logs when a frame's checksum
+    // diverged from its rollback re-simulation. It dumps both states-
+    // comparing the two per-key lists names the first subsystem that
+    // broke determinism.
+    if (!bSynctestSession || !buffer) {
+        return true;
+    }
+    SaveState* state = (SaveState*)buffer;
+    if (!state->used) {
+        // GGPO can hand back a state it already released; the shadow
+        // compare above has the reliable report.
+        spdlog::error("Synctest: state dump requested for {} but the state was already freed- see the divergence report above", filename ? filename : "?");
+        return true;
+    }
+    spdlog::error("SYNCTEST DIVERGENCE- state dump ({}):", filename ? filename : "?");
+    int idx = 0;
+    for (auto iter = state->keys.begin(); iter != state->keys.end(); iter++, idx++) {
+        spdlog::error(
+            "  key {:3}: mementoable {:08x} slots {} checksum {:08x}",
+            idx,
+            (uint32_t)(uintptr_t)iter->second.mementoableObject,
+            iter->second.numMementos,
+            ChecksumMementoKey(&iter->second)
+        );
+    }
+    uint32_t g1 = 0, g2 = 0;
+    Fletcher32(g1, g2, &state->d, sizeof(state->d));
+    spdlog::error(
+        "  flow {}/{} frame {} globals checksum {:08x}",
+        state->d.CurrentBattleFlow,
+        state->d.CurrentBattleFlowSubstate,
+        state->d.CurrentBattleFlowFrame.integral,
+        (g2 << 16) | g1
+    );
     return true;
 }
 

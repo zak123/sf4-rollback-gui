@@ -63,5 +63,12 @@ namespace sf4e {
         static void StartServer(uint16 hostPort, std::string& identity, std::string& sidecarHash, bool editionSelect, int roundCount, Dimps::Math::FixedPoint roundTime);
         static void _OnVsPreBattleTasksRegistered();
         static void _OnVsBattleTasksRegistered();
+
+        // Synctest drive, for --synctest: run a local battle under
+        // GGPO's sync-test backend to verify save/load/simulate
+        // determinism on one machine. See docs/netcode-research.md.
+        static void StartSynctestDrive();
+        static void _OnVsPreBattleTasksRegistered_Synctest();
+        static void _OnVsBattleTasksRegistered_Synctest();
     };
 }

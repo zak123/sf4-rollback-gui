@@ -20,6 +20,7 @@
 #include "../session/sf4e__SessionProtocol.hxx"
 #include "../session/sf4e__SessionServer.hxx"
 
+#include "sf4e.hxx"
 #include "sf4e__Event.hxx"
 #include "sf4e__Game__Battle.hxx"
 #include "sf4e__Game__Battle__System.hxx"
@@ -184,6 +185,86 @@ void fUserApp::_OnVsPreBattleTasksRegistered()
 
     (stageName->*Dimps::Platform::dString::publicMethods.assign)(Dimps::stageCodes[netplay->client._matchData.stageID], 4);
     *(rVsMode::GetStageCode(mode)) = netplay->client._matchData.stageID;
+}
+
+static bool s_bSynctestDriven = false;
+
+void fUserApp::StartSynctestDrive() {
+    if (s_bSynctestDriven) {
+        return;
+    }
+    // Driven from the game's own update loop, so the app object exists-
+    // but guard the root event anyway; GetRootEvent is game code, and
+    // early frames may not have built the event tree yet.
+    RootEvent* root = App::GetRootEvent();
+    if (!root) {
+        return;
+    }
+    char* mainMenuQuery[1] = { "MainMenu" };
+    rMainMenu* mainMenu = (rMainMenu*)EventBaseWithEC::FindForegroundEvent(
+        root,
+        mainMenuQuery,
+        1
+    );
+    if (!mainMenu) {
+        // Called every frame from the overlay until the menu is up.
+        return;
+    }
+    s_bSynctestDriven = true;
+    spdlog::info("Synctest: driving into a local battle");
+
+    ProgressData* progressData = *RootEvent::GetProgressData(root);
+    ProgressData::BattleTypeSettings* BattleTypeSettings = &(ProgressData::GetBattleTypeSettings(progressData)[ProgressData::NBT_PVP]);
+    *ProgressData::GetNextBattleType(progressData) = ProgressData::NBT_PVP;
+    BattleTypeSettings->editionSelect = FALSE;
+    BattleTypeSettings->rounds = 7;
+    BattleTypeSettings->timeLimit = FixedPoint{ 0, 99 };
+    fVsPreBattle::bSkipToVersus = true;
+    fVsPreBattle::OnTasksRegistered = fUserApp::_OnVsPreBattleTasksRegistered_Synctest;
+    fVsBattle::OnTasksRegistered = fUserApp::_OnVsBattleTasksRegistered_Synctest;
+    (rMainMenu::ToItemObserver(mainMenu)->*rMainMenu::itemObserverMethods.GoToVersusMode)();
+}
+
+void fUserApp::_OnVsPreBattleTasksRegistered_Synctest() {
+    char* vsModeQuery[] = { "VSMode" };
+    rVsMode* mode = (rVsMode*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsModeQuery, 1);
+    if (!mode) {
+        spdlog::error("Synctest: VsPreBattle tasks registered, but the foreground event isn't VSMode!");
+        return;
+    }
+
+    // Fixed, valid picks- the first two roster entries with default
+    // everything, the same shape the lobby app sends for a default
+    // ready. Fixed picks plus a fixed seed keep runs reproducible.
+    Dimps::Platform::dString* stageName = rVsMode::GetStageName(mode);
+    rVsMode::ConfirmedPlayerConditions* conditions = rVsMode::GetConfirmedPlayerConditions(mode);
+    for (int i = 0; i < 2; i++) {
+        rVsMode::ConfirmedCharaConditions chara = { 0 };
+        chara.charaID = (BYTE)i;
+        chara.unc_edition = Dimps::Game::Battle::ED_USF4;
+        *(rVsMode::ConfirmedPlayerConditions::GetCharaID(&conditions[i])) = i;
+        *(rVsMode::ConfirmedPlayerConditions::GetSideActive(&conditions[i])) = 1;
+        memcpy_s(
+            rVsMode::ConfirmedPlayerConditions::GetCharaConditions(&conditions[i]),
+            sizeof(rVsMode::ConfirmedCharaConditions),
+            &chara,
+            sizeof(chara)
+        );
+    }
+    (stageName->*Dimps::Platform::dString::publicMethods.assign)(Dimps::stageCodes[0], 4);
+    *(rVsMode::GetStageCode(mode)) = 0;
+}
+
+void fUserApp::_OnVsBattleTasksRegistered_Synctest() {
+    // Arm only- the session starts once the battle reports initialized
+    // (VsBattle::HasInitialized). Starting it here, during the loading
+    // screen, made the sync-test backend save its frame-0 state from a
+    // half-built battle: its constructor saves synchronously.
+    // Fixed seed: identical runs reproduce identical divergences.
+    fSystem::bSynctestPending = true;
+    fSystem::nSynctestPendingDistance = sf4e::args.nSynctestDistance;
+    fSystem::nSynctestPendingSeed = 0x5F4E0001;
+    spdlog::info("Synctest: battle tasks registered, session start armed");
 }
 
 void OnReady(sf4e::SessionClient* const client, const sf4e::SessionClient::Callbacks& c) {
@@ -387,6 +468,22 @@ void fUserApp::TickRematch() {
 }
 
 void fUserApp::Steam_PostUpdate() {
+    // The synctest drive must not run during boot: GetRootEvent is game
+    // code, and calling it before the app object exists crashes inside
+    // the game's own exception handler (observed as a silent quit ~1s
+    // in). Gate on the main menu's item observer having run- a method
+    // on a live menu object, so the event tree provably exists.
+    if (sf4e::args.bSynctest) {
+        static bool s_bLoggedArmed = false;
+        if (!s_bLoggedArmed) {
+            s_bLoggedArmed = true;
+            spdlog::info("Synctest: armed, waiting for the main menu");
+        }
+        if (fMainMenu::bAliveSeen) {
+            StartSynctestDrive();
+        }
+    }
+
     if (netplay) {
         netplay->client.PrepareForCallbacks();
     }

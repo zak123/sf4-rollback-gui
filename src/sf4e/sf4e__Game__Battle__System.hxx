@@ -64,6 +64,19 @@ namespace sf4e {
 				// doesn't run ahead during a transient outage.
 				static bool bGgpoConnectionInterrupted;
 
+				// True while a GGPO sync-test session is active: enables
+				// the full-state checksum on saves and feeds local
+				// inputs for both sides.
+				static bool bSynctestSession;
+
+				// Armed at battle-task registration, consumed by
+				// VsBattle::HasInitialized: the sync-test backend saves
+				// frame 0 in its constructor, so the session must not
+				// start until the battle is fully built.
+				static bool bSynctestPending;
+				static int nSynctestPendingDistance;
+				static DWORD nSynctestPendingSeed;
+
 				// Cleanly end a netplay match that can no longer
 				// continue: halt simulation and push the battle into the
 				// game's own leaving flow, instead of crashing.
@@ -137,6 +150,7 @@ namespace sf4e {
 
 				static void StartGGPO(GGPOPlayer* players, int numPlayers, int port, int frameDelay, DWORD rngSeed);
 				static void StartSpectating(unsigned short localport, int num_players, char* host_ip, unsigned short host_port, DWORD rngSeed);
+				static void StartSynctest(int nDistance, DWORD rngSeed);
 				static bool ggpo_on_event_callback(GGPOEvent* info);
 				static bool ggpo_begin_game_callback(const char*);
 				static bool ggpo_advance_frame_callback(int);

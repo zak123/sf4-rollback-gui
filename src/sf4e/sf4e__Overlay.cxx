@@ -1067,6 +1067,18 @@ void DrawNetworkWindow(bool* pOpen) {
 	else {
 		switch (netState) {
 		case NWS_CAPTURE:
+			if (sf4e::args.bSynctest) {
+				// Determinism soak: no device capture (inputs are
+				// randomized). UserApp::Steam_PostUpdate drives into
+				// the battle; this window only shows status.
+				if (!fSystem::ggpo) {
+					Text("Synctest: waiting for the main menu...");
+				}
+				else {
+					Text("Synctest running- watch the sf4e log.");
+				}
+				break;
+			}
 			if (deviceIdx == 0xff && deviceType == 0xff) {
 				PadSystem* p = PadSystem::staticMethods.GetSingleton();
 				PadSystem::__publicMethods& methods = PadSystem::publicMethods;
