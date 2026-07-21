@@ -496,9 +496,32 @@ static void FixGameSettings() {
 			);
 		}
 	}
-	std::ofstream out(path.c_str(), std::ios::binary | std::ios::trunc);
-	if (out) {
-		out.write(content.data(), (std::streamsize)content.size());
+	// Players pin their config read-only to stop the game rewriting it
+	// (a common community workaround for refresh-rate settings)- lift
+	// the attribute for the write and put it back.
+	DWORD attrs = GetFileAttributesW(path.c_str());
+	bool bWasReadOnly =
+		attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY);
+	if (bWasReadOnly) {
+		SetFileAttributesW(path.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY);
+	}
+	bool bWrote = false;
+	{
+		std::ofstream out(path.c_str(), std::ios::binary | std::ios::trunc);
+		if (out) {
+			out.write(content.data(), (std::streamsize)content.size());
+			bWrote = true;
+		}
+	}
+	if (bWasReadOnly) {
+		SetFileAttributesW(path.c_str(), attrs);
+	}
+	if (!bWrote) {
+		spdlog::warn("Could not write the game config");
+		g_app.alerts.push_back(
+			"Couldn't write the game's config.ini- fix the settings in "
+			"the game's PC options instead"
+		);
 	}
 	g_nextGameSettingsCheck = 0;
 }
