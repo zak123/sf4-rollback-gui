@@ -51,9 +51,10 @@ function Wait-RunEnd {
         }
         $started = (Test-Path $gameLog) -and (Select-String -Path $gameLog -Pattern "Synctest session up" -Quiet)
         if (-not $started -and $presses -lt 15) {
-            # Nudge past the title screen; only the game window gets keys.
+            # Nudge past the title screen with Space; only the game
+            # window gets keys.
             if ($shell.AppActivate($game.Id)) {
-                $shell.SendKeys("{ENTER}")
+                $shell.SendKeys(" ")
                 $presses++
             }
         }
