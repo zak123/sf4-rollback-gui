@@ -34,13 +34,14 @@ New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 $gameLog = Join-Path $env:APPDATA "sf4e\logs\sf4e.log"
 $summary = Join-Path $OutDir "summary.log"
-$shell = New-Object -ComObject WScript.Shell
 
 "soak start: $Runs runs, rollback depth $Frames, launcher $Launcher" | Tee-Object -FilePath $summary -Append
 
+# The sidecar advances the title screen itself in synctest mode (an
+# in-process input pulse), so this loop only watches for the verdict-
+# no synthetic keystrokes, no window focus changes.
 function Wait-RunEnd {
     param([datetime]$Deadline)
-    $presses = 0
     while ((Get-Date) -lt $Deadline) {
         Start-Sleep -Seconds 10
         $game = Get-Process SSFIV -ErrorAction SilentlyContinue
@@ -48,15 +49,6 @@ function Wait-RunEnd {
             # Divergence assert or crash already ended the game.
             Start-Sleep -Seconds 3
             return
-        }
-        $started = (Test-Path $gameLog) -and (Select-String -Path $gameLog -Pattern "Synctest session up" -Quiet)
-        if (-not $started -and $presses -lt 15) {
-            # Nudge past the title screen with Space; only the game
-            # window gets keys.
-            if ($shell.AppActivate($game.Id)) {
-                $shell.SendKeys(" ")
-                $presses++
-            }
         }
         $ended = (Test-Path $gameLog) -and (Select-String -Path $gameLog -Pattern "SYNCTEST DIVERGENCE|Synctest ended" -Quiet)
         if ($ended) {

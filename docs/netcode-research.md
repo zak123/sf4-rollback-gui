@@ -106,10 +106,19 @@ hide- and every run logs a `Synctest picks:` line with the exact
 flags to replay it. The seed drives the battle RNG *and* the
 randomized input stream, so a replayed run diverges on the same frame.
 
-For unattended log gathering, the soak harness loops runs, nudges each
-past the title screen, and files per-run logs plus a verdict summary:
+For gathering many runs, the soak harness loops launches and files
+per-run logs plus a verdict summary:
 
     scripts\synctest-soak.ps1 -Runs 20 [-Frames 8] [-StopOnDivergence]
+
+**Known gap:** the title screen does not advance unattended yet- press
+any button once per run when it appears. Everything after that is
+automatic. OS-level synthetic keystrokes minimize the
+exclusive-fullscreen game, and the title polls neither
+`GetButtons_MappedOn/RawOn` nor `CaptureNextMatchingPadToSide` (both
+were tried in-process), so automating it needs more RE- likely the
+raw-device layer (`System_RawInput`/`System_XInput`) or the title
+event itself.
 
 Watch `%APPDATA%\sf4e\logs\sf4e.log` (or `synctest-results\`):
 
