@@ -1414,12 +1414,26 @@ static void DrawSessionScreen() {
 	}
 
 	// Header strip: who you are, where you are, how the connection
-	// feels (+R shows ping up front), and the settings light.
+	// feels (+R shows ping up front), and the settings light. The
+	// default port is dropped from the display- "@ sf4.zak123.com"
+	// reads nicer- but a nonstandard port stays visible because it's
+	// exactly what someone on a custom server needs to see.
+	char displayAddr[sizeof(g_app.szServerAddr)];
+	strncpy_s(displayAddr, g_app.szServerAddr, _TRUNCATE);
+	{
+		char defaultSuffix[16];
+		snprintf(defaultSuffix, sizeof(defaultSuffix), ":%d", kDefaultServerPort);
+		size_t addrLen = strlen(displayAddr);
+		size_t sufLen = strlen(defaultSuffix);
+		if (addrLen > sufLen && strcmp(displayAddr + addrLen - sufLen, defaultSuffix) == 0) {
+			displayAddr[addrLen - sufLen] = 0;
+		}
+	}
 	ImGui::Text("%s", c._name.c_str());
 	ImGui::SameLine();
 	int ping = c.GetPingMs();
 	if (ping >= 0) {
-		ImGui::TextDisabled("@ %s  |  %d ms", g_app.szServerAddr, ping);
+		ImGui::TextDisabled("@ %s  |  %d ms", displayAddr, ping);
 		if (ImGui::IsItemHovered()) {
 			// The relay runs on the same host as the lobby server, so
 			// this one number covers both roles.
@@ -1432,7 +1446,7 @@ static void DrawSessionScreen() {
 		}
 	}
 	else {
-		ImGui::TextDisabled("@ %s", g_app.szServerAddr);
+		ImGui::TextDisabled("@ %s", displayAddr);
 	}
 	if (bVersionMismatch) {
 		ImGui::SameLine(0.0f, 24.0f);
