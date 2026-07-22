@@ -77,7 +77,8 @@ int SessionClient::Connect(HSteamNetConnection newConn) {
 	// function pointer directly. The failure mode if you pass the function
 	// pointer directly is _extremely_ confusing- it just appears to be
 	// a segfault in the GNS callback loop.
-	void* callback = SteamNetConnectionStatusChangedCallback;
+	// The explicit cast matters to GCC; MSVC converts silently.
+	void* callback = (void*)SteamNetConnectionStatusChangedCallback;
 	SteamNetworkingUtils()->SetConfigValue(
 		k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
 		k_ESteamNetworkingConfig_Connection,
@@ -593,10 +594,17 @@ void SessionClient::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusCh
 
 EResult SessionClient::Send(nlohmann::json& msg, int64_t* outMessageNum) {
 	std::string buf = msg.dump();
-	return _interface->SendMessageToConnection(
+	// GNS's int64 (long long) and glibc's int64_t (long) are distinct
+	// types on 64-bit Linux; bridge through GNS's.
+	int64 msgNum = 0;
+	EResult result = _interface->SendMessageToConnection(
 		_conn, buf.c_str(), (uint32)buf.length(),
-		k_nSteamNetworkingSend_Reliable, outMessageNum
+		k_nSteamNetworkingSend_Reliable, &msgNum
 	);
+	if (outMessageNum) {
+		*outMessageNum = (int64_t)msgNum;
+	}
+	return result;
 }
 
 EResult SessionClient::Lobby_Create(const std::string& name, bool editionSelect, int32_t roundCount, Dimps::Math::FixedPoint roundTime)

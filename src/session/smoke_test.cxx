@@ -556,7 +556,7 @@ int main(int argc, char** argv) {
 				"both games loading releases the battle sync barrier"
 			);
 
-			DWORD seedBefore = 0;
+			uint32_t seedBefore = 0;
 			{
 				sf4e::Lobby* lobby = server.registry.FindByKey(lobbyKey);
 				if (lobby) {

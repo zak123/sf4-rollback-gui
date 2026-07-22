@@ -110,7 +110,8 @@ void SessionServer::AddConnection(HSteamNetConnection newConn) {
 	// function pointer directly. The failure mode if you pass the function
 	// pointer directly is _extremely_ confusing- it just appears to be
 	// a segfault in the GNS callback loop.
-	void* callback = SteamNetConnectionStatusChangedCallback;
+	// The explicit cast matters to GCC; MSVC converts silently.
+	void* callback = (void*)SteamNetConnectionStatusChangedCallback;
 	SteamNetworkingUtils()->SetConfigValue(
 		k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
 		k_ESteamNetworkingConfig_Connection,
@@ -1020,7 +1021,7 @@ int SessionServer::Step()
 			// the apps, and replaying the old seed would replay the
 			// match's randomness.
 			static std::mt19937_64 seedGen(std::random_device{}());
-			lobby->match.rngSeed = (DWORD)seedGen();
+			lobby->match.rngSeed = (uint32_t)seedGen();
 			lobby->dirty = true;
 		}
 		else if (type == SessionProtocol::MT_LOBBY_REPORTRESULTS) {
