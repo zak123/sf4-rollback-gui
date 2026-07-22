@@ -125,14 +125,21 @@ jobs:
 
   # The dedicated server also builds on Linux (cheaper always-on
   # hosting). Only Session, Lobbyd, and the smoke test exist there; the
-  # smoke test is the correctness gate for the port.
+  # smoke test is the correctness gate for the port. Built inside an
+  # Amazon Linux 2023 container because that's the deployed box's
+  # distro: a binary from the stock ubuntu runner links glibc 2.38+
+  # symbols and won't load against AL2023's glibc 2.34.
   linux-server:
     runs-on: ubuntu-latest
+    container: amazonlinux:2023
     timeout-minutes: 60
     env:
       VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
       VCPKG_ROOT: /opt/vcpkg-ci
     steps:
+      - name: Install build tools
+        run: dnf install -y gcc gcc-c++ make cmake ninja-build git tar gzip zip unzip perl pkgconfig python3 which
+
       - uses: actions/checkout@v4
 
       - name: Export Actions cache environment for vcpkg
