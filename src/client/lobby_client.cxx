@@ -82,7 +82,7 @@ struct App {
 	std::unique_ptr<SessionClient> client;
 
 	char szName[32] = { 0 };
-	char szServerAddr[64] = "sf4.zak123.com:23450";
+	char szServerAddr[64] = "sf4.zak123.com";
 	char szChatInput[SessionProtocol::CHAT_TEXT_MAX] = { 0 };
 	char szNewLobbyName[64] = { 0 };
 	int newLobbyRoundCountIdx = 1;
@@ -630,12 +630,29 @@ static void DrawGameSettingsLight() {
 // -------------------------------------------------------------------
 // Actions
 
+static const int kDefaultServerPort = 23450;
+
+// A bare hostname or IPv4 address (no colon anywhere) gets the default
+// port appended, so "sf4.zak123.com" is enough at the login screen.
+// The normalized form is written back into the field: the header, the
+// saved config, and the --join-server handed to the launched game all
+// expect host:port.
+static void NormalizeServerAddr() {
+	if (g_app.szServerAddr[0] == 0 || strchr(g_app.szServerAddr, ':') != nullptr) {
+		return;
+	}
+	char full[sizeof(g_app.szServerAddr) + 8];
+	snprintf(full, sizeof(full), "%s:%d", g_app.szServerAddr, kDefaultServerPort);
+	strncpy_s(g_app.szServerAddr, full, _TRUNCATE);
+}
+
 static void ConnectToServer() {
+	NormalizeServerAddr();
 	SteamNetworkingIPAddr addr;
 	if (!sf4e::Net::ResolveHostPort(g_app.szServerAddr, addr)) {
 		PushAlert(
 			"Could not find that server- the address should look like "
-			"play.example.com:23450 or 203.0.113.7:23450"
+			"sf4.zak123.com or 203.0.113.7 (port optional, default 23450)"
 		);
 		return;
 	}
