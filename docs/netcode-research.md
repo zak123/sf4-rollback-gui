@@ -130,19 +130,24 @@ Watch `%APPDATA%\sf4e\logs\sf4e.log` (or `synctest-results\`):
 ### Findings ledger
 
 1. **Rollback across a battle-flow transition diverges (found
-   2026-07-20, first synctest session).** Two runs (random inputs,
-   frames 2535/2678 ≈ the 42-45s mark, where round transitions land)
-   diverged in all three flow-global groups while every memento key
-   stayed clean: flow ids/frames drift, the re-simulation's flow
-   callback pointers are NULL where the original run had one set, and
-   the GameManager copy differs. Reading: the battle-flow machinery
-   isn't fully captured/restored, so a rollback that crosses a flow
-   transition (round end) re-simulates a different flow timeline.
-   Real matches play clean because mid-round rollbacks never touch
-   this- but a rollback landing exactly on a round boundary would
-   desync. Fix candidates: capture the missing flow state in the
-   save state, or hold rollback across flow transitions the way the
-   game holds inputs during them.
+   2026-07-20, FIXED 2026-07-21).** Two runs (frames 2535/2678/2728 ≈
+   the 42-45s mark, where round transitions land) diverged in all
+   three flow-global groups while every memento key stayed clean.
+   **Root cause:** `BattleUpdate`'s main gate was
+   `if (ggpo && CurrentBattleFlow != BF__IDLE)`. During the IDLE
+   frames a round transition passes through, the game ran its native
+   simulation via the else branch WITHOUT calling `ggpo_advance_frame`
+   or capturing a snapshot- so those frames mutated state but weren't
+   GGPO frames. Rollback requires a 1:1 map between GGPO frames and
+   simulation steps; on replay GGPO runs one update per frame and the
+   extra IDLE steps were lost, so the flow state machine landed
+   somewhere different (the field dump showed the re-sim in BF__IDLE
+   with null flow callables where the original was in BF__READY). This
+   is why real matches desynced ~4 minutes in: a rollback eventually
+   spanned a round boundary. **Fix:** gate on `ggpo` alone, so IDLE
+   frames advance GGPO like any other. Synctest verified: the seed
+   that diverged at frame 2728 now runs 4200+ frames clean across
+   multiple round transitions.
 
 ## What requires the game executable
 

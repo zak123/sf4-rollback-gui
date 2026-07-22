@@ -194,12 +194,59 @@ static int ChecksumSaveState(const fSystem::SaveState* s, std::vector<uint32_t>*
 // runs before GGPO's own checksum assert ends the run, and doesn't
 // depend on GGPO's buffer lifetimes (which made the log_game_state
 // dump unreliable).
-static std::map<int, std::vector<uint32_t>> s_synctestFrameHashes;
+struct SynctestFrame {
+    std::vector<uint32_t> parts;
+    fSystem::SaveState::GlobalData d;
+};
+static std::map<int, SynctestFrame> s_synctestFrameHashes;
+
+// On a flow-globals divergence, dump the actual field values (not just
+// hashes) of the original vs the re-simulated frame- that names the
+// exact uncaptured field instead of "something in the globals".
+static void DumpGlobalsDiff(const fSystem::SaveState::GlobalData& a, const fSystem::SaveState::GlobalData& b) {
+#define DIFF_DW(field) if (a.field != b.field) spdlog::error("    {}: original {:#x} resim {:#x}", #field, (uint32_t)a.field, (uint32_t)b.field)
+    DIFF_DW(CurrentBattleFlow);
+    DIFF_DW(PreviousBattleFlow);
+    DIFF_DW(CurrentBattleFlowSubstate);
+    DIFF_DW(PreviousBattleFlowSubstate);
+#undef DIFF_DW
+#define DIFF_FP(field) if (a.field.integral != b.field.integral || a.field.fractional != b.field.fractional) \
+        spdlog::error("    {}: original {}.{:04x} resim {}.{:04x}", #field, a.field.integral, (uint16_t)a.field.fractional, b.field.integral, (uint16_t)b.field.fractional)
+    DIFF_FP(CurrentBattleFlowFrame);
+    DIFF_FP(CurrentBattleFlowSubstateFrame);
+    DIFF_FP(PreviousBattleFlowFrame);
+    DIFF_FP(PreviousBattleFlowSubstateFrame);
+#undef DIFF_FP
+    if (a.BattleFlowSubstateCallable_aa9258 != b.BattleFlowSubstateCallable_aa9258) {
+        spdlog::error("    SubstateCallable: original {:#x} resim {:#x}",
+            (uint32_t)(uintptr_t)a.BattleFlowSubstateCallable_aa9258,
+            (uint32_t)(uintptr_t)b.BattleFlowSubstateCallable_aa9258);
+    }
+    if (a.BattleFlowCallback_CallEveryFrame_aa9254 != b.BattleFlowCallback_CallEveryFrame_aa9254) {
+        spdlog::error("    CallEveryFrameCallback: original {:#x} resim {:#x}",
+            (uint32_t)(uintptr_t)a.BattleFlowCallback_CallEveryFrame_aa9254,
+            (uint32_t)(uintptr_t)b.BattleFlowCallback_CallEveryFrame_aa9254);
+    }
+    // GameManager: name the first differing 4-byte offsets so the field
+    // can be located in the RE'd 0x49c-byte blob.
+    const uint32_t* ga = (const uint32_t*)&a.gameManager;
+    const uint32_t* gb = (const uint32_t*)&b.gameManager;
+    int shown = 0;
+    for (size_t off = 0; off < sizeof(a.gameManager) / 4 && shown < 8; off++) {
+        if (ga[off] != gb[off]) {
+            spdlog::error("    gameManager+{:#05x}: original {:#010x} resim {:#010x}", off * 4, ga[off], gb[off]);
+            shown++;
+        }
+    }
+}
 
 static void SynctestCompareFrame(int frame, const fSystem::SaveState* state, std::vector<uint32_t>& parts) {
     auto prior = s_synctestFrameHashes.find(frame);
     if (prior == s_synctestFrameHashes.end()) {
-        s_synctestFrameHashes[frame] = parts;
+        SynctestFrame sf;
+        sf.parts = parts;
+        sf.d = state->d;
+        s_synctestFrameHashes[frame] = sf;
         // A bounded window is plenty- comparisons happen within the
         // rollback distance of the original save.
         while (s_synctestFrameHashes.size() > 64) {
@@ -208,12 +255,13 @@ static void SynctestCompareFrame(int frame, const fSystem::SaveState* state, std
         return;
     }
 
-    if (prior->second != parts) {
+    if (prior->second.parts != parts) {
         size_t nKeys = state->keys.size();
         spdlog::error("SYNCTEST DIVERGENCE at frame {}: re-simulation differs from the original run", frame);
-        size_t n = parts.size() < prior->second.size() ? parts.size() : prior->second.size();
+        bool flowDiverged = false;
+        size_t n = parts.size() < prior->second.parts.size() ? parts.size() : prior->second.parts.size();
         for (size_t k = 0; k < n; k++) {
-            if (prior->second[k] == parts[k]) {
+            if (prior->second.parts[k] == parts[k]) {
                 continue;
             }
             if (k < nKeys) {
@@ -221,7 +269,7 @@ static void SynctestCompareFrame(int frame, const fSystem::SaveState* state, std
                     "  key {:3} (mementoable {:08x}): original {:08x} resim {:08x}",
                     k,
                     (uint32_t)(uintptr_t)state->keys[k].second.mementoableObject,
-                    prior->second[k],
+                    prior->second.parts[k],
                     parts[k]
                 );
             }
@@ -231,13 +279,17 @@ static void SynctestCompareFrame(int frame, const fSystem::SaveState* state, std
                     "  part {:3} ({}): original {:08x} resim {:08x}",
                     k,
                     tail == 0 ? "battle flow ids/frames" : tail == 1 ? "flow callables" : "game manager",
-                    prior->second[k],
+                    prior->second.parts[k],
                     parts[k]
                 );
+                flowDiverged = true;
             }
         }
-        if (parts.size() != prior->second.size()) {
-            spdlog::error("  component count differs: original {} resim {}", prior->second.size(), parts.size());
+        if (flowDiverged) {
+            DumpGlobalsDiff(prior->second.d, state->d);
+        }
+        if (parts.size() != prior->second.parts.size()) {
+            spdlog::error("  component count differs: original {} resim {}", prior->second.parts.size(), parts.size());
         }
     }
     s_synctestFrameHashes.erase(prior);
@@ -457,7 +509,16 @@ void fSystem::BattleUpdate() {
         return;
     }
 
-    if (ggpo && *rSystem::staticVars.CurrentBattleFlow != BF__IDLE) {
+    // Every frame that runs the native simulation under an active GGPO
+    // session MUST advance GGPO too- rollback requires a 1:1 map between
+    // GGPO frames and simulation steps. The old gate also excluded
+    // BF__IDLE, so the game advanced state during round-transition IDLE
+    // frames WITHOUT advancing GGPO; on rollback those steps were lost
+    // and the battle-flow state machine diverged (found via synctest:
+    // the re-simulation landed in a different flow state at the first
+    // round transition, ~frame 2728). Gating on `ggpo` alone closes the
+    // hole; the else branch now runs only offline (no GGPO).
+    if (ggpo) {
         GGPOErrorCode result = GGPO_OK;
         if (localPlayerHandle != GGPO_INVALID_HANDLE) {
             for (int i = 0; i < 2; i++) {
