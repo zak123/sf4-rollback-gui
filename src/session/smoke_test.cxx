@@ -8,9 +8,6 @@
 #include <string>
 #include <vector>
 
-#include <winsock2.h>
-#include <windows.h>
-
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
@@ -20,6 +17,7 @@
 #include <atomic>
 #include <thread>
 
+#include "sf4e__Portable.hxx"
 #include "sf4e__Resolve.hxx"
 #include "sf4e__SessionClient.hxx"
 #include "sf4e__SessionProtocol.hxx"
@@ -182,7 +180,7 @@ static bool PumpUntil(SessionServer& server, int timeoutMs, std::function<bool()
 		if (done()) {
 			return true;
 		}
-		Sleep(5);
+		sf4e::Portable::SleepMs(5);
 		elapsed += 5;
 	}
 	return done();
@@ -264,15 +262,14 @@ int main(int argc, char** argv) {
 			// the relay (port TEST_PORT+3) under one token, then a
 			// datagram from one must arrive at the other.
 			{
-				SOCKET g0 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-				SOCKET g1 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+				sf4e::Portable::Socket g0 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+				sf4e::Portable::Socket g1 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 				sockaddr_in any = { 0 };
 				any.sin_family = AF_INET;
 				any.sin_addr.s_addr = htonl(0x7f000001);
 				bind(g0, (sockaddr*)&any, sizeof(any));
 				bind(g1, (sockaddr*)&any, sizeof(any));
-				DWORD to = 500;
-				setsockopt(g1, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
+				sf4e::Portable::SetRecvTimeoutMs(g1, 500);
 
 				sockaddr_in relayAddr = { 0 };
 				relayAddr.sin_family = AF_INET;
@@ -292,8 +289,8 @@ int main(int argc, char** argv) {
 					rgot == (int)strlen(payload) && memcmp(rbuf, payload, rgot) == 0,
 					"the relay cross-forwards a datagram between paired seats"
 				);
-				closesocket(g0);
-				closesocket(g1);
+				sf4e::Portable::CloseSocket(g0);
+				sf4e::Portable::CloseSocket(g1);
 			}
 
 			TestClientCtx* alice = MakeClient("alice", 24001);
@@ -461,7 +458,7 @@ int main(int argc, char** argv) {
 
 			// Ready flow: both sides pick and ready up, which makes the
 			// server broadcast all-ready and issue seat handoff tokens.
-			Dimps::GameEvents::VsMode::ConfirmedCharaConditions chara;
+			Dimps::GameEvents::Wire::ConfirmedCharaConditions chara;
 			memset(&chara, 0, sizeof(chara));
 			chara.charaID = 5;
 			alice->c->PreBattle_SetChara(chara);

@@ -2,13 +2,13 @@
 #include <string>
 #include <string.h>
 
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 
+#include "sf4e__Portable.hxx"
 #include "sf4e__Resolve.hxx"
+
+using namespace sf4e::Portable;
 
 bool sf4e::Net::ResolveHostPort(const char* input, SteamNetworkingIPAddr& out) {
 	out.Clear();
@@ -31,8 +31,9 @@ bool sf4e::Net::ResolveHostPort(const char* input, SteamNetworkingIPAddr& out) {
 		return false;
 	}
 
-	// Resolution requires an initialized Winsock; every caller runs
-	// after GameNetworkingSockets_Init, which handles WSAStartup.
+	// On Windows, resolution requires an initialized Winsock; every
+	// caller runs after GameNetworkingSockets_Init, which handles
+	// WSAStartup.
 	addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
@@ -52,28 +53,27 @@ static const char PROBE_MAGIC[] = "SF4EPROBE";
 
 bool sf4e::Net::Net_ProbeGgpoPort(const SteamNetworkingIPAddr& server, uint16_t nLocalPort, NatProbe& out) {
 	out.ok = false;
-	out.sock = (uintptr_t)INVALID_SOCKET;
+	out.sock = (uintptr_t)kInvalidSocket;
 	uint32 serverIp = server.GetIPv4();
 	if (!serverIp) {
 		return false;
 	}
 
-	SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (s == INVALID_SOCKET) {
+	Socket s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (s == kInvalidSocket) {
 		return false;
 	}
-	BOOL reuse = TRUE;
+	int reuse = 1;
 	setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
 	sockaddr_in local = { 0 };
 	local.sin_family = AF_INET;
 	local.sin_addr.s_addr = INADDR_ANY;
 	local.sin_port = htons(nLocalPort);
 	if (bind(s, (sockaddr*)&local, sizeof(local)) != 0) {
-		closesocket(s);
+		CloseSocket(s);
 		return false;
 	}
-	DWORD timeoutMs = 400;
-	setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeoutMs, sizeof(timeoutMs));
+	SetRecvTimeoutMs(s, 400);
 
 	sockaddr_in dest = { 0 };
 	dest.sin_family = AF_INET;
@@ -84,21 +84,21 @@ bool sf4e::Net::Net_ProbeGgpoPort(const SteamNetworkingIPAddr& server, uint16_t 
 	for (int attempt = 0; attempt < 3 && !out.ok; attempt++) {
 		sendto(s, PROBE_MAGIC, sizeof(PROBE_MAGIC) - 1, 0, (sockaddr*)&dest, sizeof(dest));
 		sockaddr_in from = { 0 };
-		int fromLen = sizeof(from);
-		int got = recvfrom(s, reply, sizeof(reply) - 1, 0, (sockaddr*)&from, &fromLen);
+		SockLen fromLen = sizeof(from);
+		int got = (int)recvfrom(s, reply, sizeof(reply) - 1, 0, (sockaddr*)&from, &fromLen);
 		if (got <= (int)sizeof(PROBE_MAGIC) - 1) {
 			continue;
 		}
 		reply[got] = 0;
 		unsigned int a, b, c, d, p;
-		if (sscanf_s(reply, "SF4EPROBE %u.%u.%u.%u:%u", &a, &b, &c, &d, &p) == 5 && p > 0 && p < 65536) {
+		if (SF4E_SSCANF(reply, "SF4EPROBE %u.%u.%u.%u:%u", &a, &b, &c, &d, &p) == 5 && p > 0 && p < 65536) {
 			out.publicPort = (uint16_t)p;
 			snprintf(out.publicAddr, sizeof(out.publicAddr), "%u.%u.%u.%u:%u", a, b, c, d, p);
 			out.ok = true;
 		}
 	}
 	if (!out.ok) {
-		closesocket(s);
+		CloseSocket(s);
 		return false;
 	}
 
@@ -110,14 +110,14 @@ bool sf4e::Net::Net_ProbeGgpoPort(const SteamNetworkingIPAddr& server, uint16_t 
 	for (int attempt = 0; attempt < 2 && !out.symmetricKnown; attempt++) {
 		sendto(s, PROBE_MAGIC, sizeof(PROBE_MAGIC) - 1, 0, (sockaddr*)&dest, sizeof(dest));
 		sockaddr_in from = { 0 };
-		int fromLen = sizeof(from);
-		int got = recvfrom(s, reply, sizeof(reply) - 1, 0, (sockaddr*)&from, &fromLen);
+		SockLen fromLen = sizeof(from);
+		int got = (int)recvfrom(s, reply, sizeof(reply) - 1, 0, (sockaddr*)&from, &fromLen);
 		if (got <= (int)sizeof(PROBE_MAGIC) - 1) {
 			continue;
 		}
 		reply[got] = 0;
 		unsigned int a, b, c, d, p;
-		if (sscanf_s(reply, "SF4EPROBE %u.%u.%u.%u:%u", &a, &b, &c, &d, &p) == 5 && p > 0 && p < 65536) {
+		if (SF4E_SSCANF(reply, "SF4EPROBE %u.%u.%u.%u:%u", &a, &b, &c, &d, &p) == 5 && p > 0 && p < 65536) {
 			out.publicPort2 = (uint16_t)p;
 			out.symmetricKnown = true;
 			out.symmetric = out.publicPort2 != out.publicPort;
@@ -125,31 +125,30 @@ bool sf4e::Net::Net_ProbeGgpoPort(const SteamNetworkingIPAddr& server, uint16_t 
 	}
 
 	// Keepalive phase: non-blocking so per-frame ticks never stall.
-	u_long nonblock = 1;
-	ioctlsocket(s, FIONBIO, &nonblock);
+	SetNonBlocking(s);
 	out.sock = (uintptr_t)s;
 	return true;
 }
 
 void sf4e::Net::Net_ProbeKeepalive(NatProbe& probe, const SteamNetworkingIPAddr& server) {
-	if (!probe.ok || (SOCKET)probe.sock == INVALID_SOCKET) {
+	if (!probe.ok || (Socket)probe.sock == kInvalidSocket) {
 		return;
 	}
 	// Drain stale echoes, then refresh the NAT mapping.
 	char sink[64];
-	while (recv((SOCKET)probe.sock, sink, sizeof(sink), 0) > 0) {
+	while (recv((Socket)probe.sock, sink, sizeof(sink), 0) > 0) {
 	}
 	sockaddr_in dest = { 0 };
 	dest.sin_family = AF_INET;
 	dest.sin_addr.s_addr = htonl(server.GetIPv4());
 	dest.sin_port = htons(server.m_port + 1);
-	sendto((SOCKET)probe.sock, PROBE_MAGIC, sizeof(PROBE_MAGIC) - 1, 0, (sockaddr*)&dest, sizeof(dest));
+	sendto((Socket)probe.sock, PROBE_MAGIC, sizeof(PROBE_MAGIC) - 1, 0, (sockaddr*)&dest, sizeof(dest));
 }
 
 void sf4e::Net::Net_ProbeClose(NatProbe& probe) {
-	if ((SOCKET)probe.sock != INVALID_SOCKET) {
-		closesocket((SOCKET)probe.sock);
-		probe.sock = (uintptr_t)INVALID_SOCKET;
+	if ((Socket)probe.sock != kInvalidSocket) {
+		CloseSocket((Socket)probe.sock);
+		probe.sock = (uintptr_t)kInvalidSocket;
 	}
 	probe.ok = false;
 }
@@ -165,18 +164,18 @@ bool sf4e::Net::Net_RelayRegister(const char* relayEndpoint, uint16_t nLocalPort
 		return false;
 	}
 
-	SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (s == INVALID_SOCKET) {
+	Socket s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (s == kInvalidSocket) {
 		return false;
 	}
-	BOOL reuse = TRUE;
+	int reuse = 1;
 	setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
 	sockaddr_in local = { 0 };
 	local.sin_family = AF_INET;
 	local.sin_addr.s_addr = INADDR_ANY;
 	local.sin_port = htons(nLocalPort);
 	if (bind(s, (sockaddr*)&local, sizeof(local)) != 0) {
-		closesocket(s);
+		CloseSocket(s);
 		return false;
 	}
 
@@ -195,6 +194,6 @@ bool sf4e::Net::Net_RelayRegister(const char* relayEndpoint, uint16_t nLocalPort
 		sendto(s, msg, len, 0, (sockaddr*)&dest, sizeof(dest));
 	}
 
-	closesocket(s);
+	CloseSocket(s);
 	return true;
 }

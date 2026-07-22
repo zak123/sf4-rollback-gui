@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 #include <string>
 #include <utility>
 
@@ -7,8 +8,9 @@
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 #include <nlohmann/json.hpp>
 
-#include "../Dimps/Dimps__GameEvents.hxx"
-#include "../Dimps/Dimps__Math.hxx"
+// Only the wire-portable game structs, not the RE headers: the session
+// layer also builds on Linux for the dedicated server.
+#include "../Dimps/Dimps__Wire.hxx"
 
 #define MAX_SF4E_PROTOCOL_USERS 4
 
@@ -82,9 +84,9 @@ namespace sf4e {
 			bool IsAllReady();
 
 			int64_t readyMessageNum[2];
-			Dimps::GameEvents::VsMode::ConfirmedCharaConditions chara[2];
+			Dimps::GameEvents::Wire::ConfirmedCharaConditions chara[2];
 			int64_t stageID;
-			DWORD rngSeed;
+			uint32_t rngSeed;
 
 			// "ip:port" of the UDP relay both games must route GGPO
 			// through, set by the server when a seat's NAT can't be
@@ -354,7 +356,7 @@ namespace sf4e {
 
 		struct PreBattleSetChara {
 			MessageType type = MT_PREBATTLE_SETCHARA;
-			Dimps::GameEvents::VsMode::ConfirmedCharaConditions chara;
+			Dimps::GameEvents::Wire::ConfirmedCharaConditions chara;
 		};
 
 		struct PreBattleSetStage {

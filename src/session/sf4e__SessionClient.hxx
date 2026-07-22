@@ -99,7 +99,7 @@ namespace sf4e {
 		EResult Matchmake_Set(bool enabled);
 
 		EResult PreBattle_SetEnv(uint32_t rngSeed);
-		EResult PreBattle_SetChara(const Dimps::GameEvents::VsMode::ConfirmedCharaConditions& chara);
+		EResult PreBattle_SetChara(const Dimps::GameEvents::Wire::ConfirmedCharaConditions& chara);
 		EResult PreBattle_SetStage(int32_t stageID);
 
 		EResult Battle_Loaded();

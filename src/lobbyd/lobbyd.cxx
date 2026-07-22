@@ -3,16 +3,24 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
 #include <windows.h>
+#include <spdlog/sinks/wincolor_sink.h>
+#else
+#include <csignal>
+#include <limits.h>
+#include <unistd.h>
+#include <spdlog/sinks/ansicolor_sink.h>
+#endif
 
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/sinks/wincolor_sink.h>
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 
-#include "../Dimps/Dimps__Math.hxx"
+#include "../Dimps/Dimps__Wire.hxx"
+#include "../session/sf4e__Portable.hxx"
 #include "../session/sf4e__SessionServer.hxx"
 
 using Dimps::Math::FixedPoint;
@@ -24,6 +32,8 @@ using Dimps::Math::FixedPoint;
 // 1v1 lobby, matching the in-game server's behavior.
 
 static std::atomic<bool> g_bQuit(false);
+
+#ifdef _WIN32
 
 static BOOL WINAPI OnConsoleCtrl(DWORD dwCtrlType) {
 	switch (dwCtrlType) {
@@ -56,6 +66,17 @@ static LONG WINAPI OnUnhandledException(EXCEPTION_POINTERS* pInfo) {
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 
+#else
+
+// On Linux the equivalents come from the platform: systemd/journald
+// keep the crash record (plus core dumps), and SIGINT/SIGTERM are the
+// shutdown signals.
+static void OnPosixSignal(int) {
+	g_bQuit = true;
+}
+
+#endif
+
 static void OnGNSDebugOutput(ESteamNetworkingSocketsDebugOutputType eType, const char* pszMsg) {
 	if (eType <= k_ESteamNetworkingSocketsDebugOutputType_Warning) {
 		spdlog::warn("GNS: {}", pszMsg);
@@ -70,6 +91,7 @@ static void OnGNSDebugOutput(ESteamNetworkingSocketsDebugOutputType eType, const
 // absence of which made the first outage undiagnosable.
 static void SetUpLogging(bool verbose) {
 	std::vector<spdlog::sink_ptr> sinks;
+#ifdef _WIN32
 	sinks.push_back(std::make_shared<spdlog::sinks::wincolor_stdout_sink_mt>());
 
 	wchar_t exePath[MAX_PATH] = { 0 };
@@ -88,6 +110,27 @@ static void SetUpLogging(bool verbose) {
 			}
 		}
 	}
+#else
+	sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stdout_sink_mt>());
+
+	char exePath[PATH_MAX] = { 0 };
+	ssize_t n = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+	if (n > 0) {
+		std::string dir(exePath, (size_t)n);
+		size_t slash = dir.find_last_of('/');
+		if (slash != std::string::npos) {
+			std::string logPath = dir.substr(0, slash) + "/logs/Lobbyd.log";
+			try {
+				sinks.push_back(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+					logPath, 1048576 * 5, 3, false
+				));
+			}
+			catch (const spdlog::spdlog_ex&) {
+				// File logging is best-effort; the console sink still works.
+			}
+		}
+	}
+#endif
 
 	auto logger = std::make_shared<spdlog::logger>("Lobbyd", sinks.begin(), sinks.end());
 	spdlog::set_default_logger(logger);
@@ -143,7 +186,9 @@ int main(int argc, char** argv) {
 	CLI11_PARSE(app, argc, argv);
 
 	SetUpLogging(bVerbose);
+#ifdef _WIN32
 	SetUnhandledExceptionFilter(OnUnhandledException);
+#endif
 
 	SteamDatagramErrMsg errMsg;
 	if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
@@ -155,7 +200,12 @@ int main(int argc, char** argv) {
 		OnGNSDebugOutput
 	);
 
+#ifdef _WIN32
 	SetConsoleCtrlHandler(OnConsoleCtrl, TRUE);
+#else
+	signal(SIGINT, OnPosixSignal);
+	signal(SIGTERM, OnPosixSignal);
+#endif
 
 	int ret = 0;
 	{
@@ -190,7 +240,7 @@ int main(int argc, char** argv) {
 				nPort, identity, nRoundCount, nRoundTimeSecs, bNoEditionSelect ? "off" : "on"
 			);
 
-			uint64_t nextHeartbeat = GetTickCount64() + 60000;
+			uint64_t nextHeartbeat = sf4e::Portable::NowMs() + 60000;
 			uint64_t lastStepErrorLog = 0;
 			while (!g_bQuit) {
 				server.PrepareForCallbacks();
@@ -202,20 +252,20 @@ int main(int argc, char** argv) {
 				// which, with no auto-restart, meant a single GNS hiccup
 				// became a multi-minute outage.
 				if (server.Step() != 0) {
-					uint64_t now = GetTickCount64();
+					uint64_t now = sf4e::Portable::NowMs();
 					if (now - lastStepErrorLog > 1000) {
 						lastStepErrorLog = now;
 						spdlog::error("Lobbyd Step() errored; continuing to serve");
 					}
 				}
 
-				uint64_t now = GetTickCount64();
+				uint64_t now = sf4e::Portable::NowMs();
 				if (now >= nextHeartbeat) {
 					nextHeartbeat = now + 60000;
 					spdlog::info("Lobbyd heartbeat: {} peers, {} lobbies", server.peers.size(), server.registry.lobbies.size());
 				}
 
-				Sleep(10);
+				sf4e::Portable::SleepMs(10);
 			}
 
 			spdlog::info("Lobbyd shutting down");

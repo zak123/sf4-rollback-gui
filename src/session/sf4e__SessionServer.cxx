@@ -4,18 +4,16 @@
 #include <time.h>
 #include <utility>
 #include <vector>
-#include <winsock2.h>
-#include <windows.h>
 
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 
-#include "../Dimps/Dimps__GameEvents.hxx"
-#include "../Dimps/Dimps__Math.hxx"
+#include "../Dimps/Dimps__Wire.hxx"
 
 #include "sf4e__LobbyRegistry.hxx"
+#include "sf4e__Portable.hxx"
 #include "sf4e__SessionProtocol.hxx"
 #include "sf4e__SessionServer.hxx"
 
@@ -140,44 +138,42 @@ int SessionServer::Listen(uint16 nPort) {
 	// first, clients fall back to reporting their local GGPO port;
 	// without the second, symmetric NATs go undetected.
 	for (int i = 0; i < 2; i++) {
-		SOCKET probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-		if (probe == INVALID_SOCKET) {
+		sf4e::Portable::Socket probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		if (probe == sf4e::Portable::kInvalidSocket) {
 			continue;
 		}
 		sockaddr_in bindAddr = { 0 };
 		bindAddr.sin_family = AF_INET;
 		bindAddr.sin_addr.s_addr = INADDR_ANY;
 		bindAddr.sin_port = htons(nPort + 1 + i);
-		u_long nonblock = 1;
 		if (bind(probe, (sockaddr*)&bindAddr, sizeof(bindAddr)) == 0 &&
-			ioctlsocket(probe, FIONBIO, &nonblock) == 0) {
+			sf4e::Portable::SetNonBlocking(probe)) {
 			_probeSockets[i] = (uintptr_t)probe;
 			spdlog::info("NAT probe echo listening on UDP {}", nPort + 1 + i);
 		}
 		else {
 			spdlog::warn("NAT probe echo could not bind UDP {}", nPort + 1 + i);
-			closesocket(probe);
+			sf4e::Portable::CloseSocket(probe);
 		}
 	}
 
 	// UDP relay, three ports up. Best-effort: without it, matches that
 	// need relaying simply fail the direct handshake as before.
-	SOCKET relay = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (relay != INVALID_SOCKET) {
+	sf4e::Portable::Socket relay = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (relay != sf4e::Portable::kInvalidSocket) {
 		sockaddr_in bindAddr = { 0 };
 		bindAddr.sin_family = AF_INET;
 		bindAddr.sin_addr.s_addr = INADDR_ANY;
 		bindAddr.sin_port = htons(nPort + 3);
-		u_long nonblock = 1;
 		if (bind(relay, (sockaddr*)&bindAddr, sizeof(bindAddr)) == 0 &&
-			ioctlsocket(relay, FIONBIO, &nonblock) == 0) {
+			sf4e::Portable::SetNonBlocking(relay)) {
 			_relaySocket = (uintptr_t)relay;
 			_relayPort = nPort + 3;
 			spdlog::info("UDP relay listening on UDP {}", nPort + 3);
 		}
 		else {
 			spdlog::warn("UDP relay could not bind UDP {}; symmetric-NAT matches will fail", nPort + 3);
-			closesocket(relay);
+			sf4e::Portable::CloseSocket(relay);
 		}
 	}
 	return 0;
@@ -188,15 +184,15 @@ int SessionServer::Listen(uint16 nPort) {
 // the relay each side's public endpoint; everything else from a known
 // endpoint is forwarded to its pair.
 void SessionServer::StepRelay() {
-	if ((SOCKET)_relaySocket == INVALID_SOCKET) {
+	if ((sf4e::Portable::Socket)_relaySocket == sf4e::Portable::kInvalidSocket) {
 		return;
 	}
-	uint64_t now = GetTickCount64();
+	uint64_t now = sf4e::Portable::NowMs();
 	for (int n = 0; n < 64; n++) {
 		char buf[2048];
 		sockaddr_in from = { 0 };
-		int fromLen = sizeof(from);
-		int got = recvfrom((SOCKET)_relaySocket, buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
+		sf4e::Portable::SockLen fromLen = sizeof(from);
+		int got = recvfrom((sf4e::Portable::Socket)_relaySocket, buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
 		if (got <= 0) {
 			break;
 		}
@@ -205,7 +201,14 @@ void SessionServer::StepRelay() {
 			buf[got < (int)sizeof(buf) ? got : (int)sizeof(buf) - 1] = 0;
 			char token[128] = { 0 };
 			int seat = -1;
-			if (sscanf_s(buf + 10, "%127s %d", token, (unsigned)sizeof(token), &seat) == 2 &&
+			// %s needs a size argument under sscanf_s but not sscanf, so
+			// the shim macro can't cover this one.
+#ifdef _WIN32
+			int parsed = sscanf_s(buf + 10, "%127s %d", token, (unsigned)sizeof(token), &seat);
+#else
+			int parsed = sscanf(buf + 10, "%127s %d", token, &seat);
+#endif
+			if (parsed == 2 &&
 				(seat == 0 || seat == 1)) {
 				RelayPair& pair = _relayPairs[token];
 				pair.addr[seat] = from.sin_addr.s_addr;
@@ -215,8 +218,10 @@ void SessionServer::StepRelay() {
 				spdlog::info(
 					"Relay: registered seat {} of match \"{}\" at {}.{}.{}.{}:{}",
 					seat, token,
-					from.sin_addr.S_un.S_un_b.s_b1, from.sin_addr.S_un.S_un_b.s_b2,
-					from.sin_addr.S_un.S_un_b.s_b3, from.sin_addr.S_un.S_un_b.s_b4,
+					sf4e::Portable::IpByte(from.sin_addr.s_addr, 0),
+					sf4e::Portable::IpByte(from.sin_addr.s_addr, 1),
+					sf4e::Portable::IpByte(from.sin_addr.s_addr, 2),
+					sf4e::Portable::IpByte(from.sin_addr.s_addr, 3),
 					(unsigned int)ntohs(from.sin_port)
 				);
 			}
@@ -243,7 +248,7 @@ void SessionServer::StepRelay() {
 				to.sin_family = AF_INET;
 				to.sin_addr.s_addr = pair.addr[dst];
 				to.sin_port = pair.port[dst];
-				sendto((SOCKET)_relaySocket, buf, got, 0, (sockaddr*)&to, sizeof(to));
+				sendto((sf4e::Portable::Socket)_relaySocket, buf, got, 0, (sockaddr*)&to, sizeof(to));
 				pair.lastSeenMs = now;
 			}
 			break;
@@ -266,14 +271,14 @@ int SessionServer::Step()
 	// Answer NAT probes with the sender's observed address- the
 	// endpoint a peer must use to reach that client's GGPO socket.
 	for (int p = 0; p < 2; p++) {
-		if ((SOCKET)_probeSockets[p] == INVALID_SOCKET) {
+		if ((sf4e::Portable::Socket)_probeSockets[p] == sf4e::Portable::kInvalidSocket) {
 			continue;
 		}
 		for (int n = 0; n < 8; n++) {
 			char buf[64];
 			sockaddr_in from = { 0 };
-			int fromLen = sizeof(from);
-			int got = recvfrom((SOCKET)_probeSockets[p], buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
+			sf4e::Portable::SockLen fromLen = sizeof(from);
+			int got = recvfrom((sf4e::Portable::Socket)_probeSockets[p], buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
 			if (got <= 0) {
 				break;
 			}
@@ -283,13 +288,13 @@ int SessionServer::Step()
 					reply,
 					sizeof(reply),
 					"SF4EPROBE %u.%u.%u.%u:%u",
-					from.sin_addr.S_un.S_un_b.s_b1,
-					from.sin_addr.S_un.S_un_b.s_b2,
-					from.sin_addr.S_un.S_un_b.s_b3,
-					from.sin_addr.S_un.S_un_b.s_b4,
+					sf4e::Portable::IpByte(from.sin_addr.s_addr, 0),
+					sf4e::Portable::IpByte(from.sin_addr.s_addr, 1),
+					sf4e::Portable::IpByte(from.sin_addr.s_addr, 2),
+					sf4e::Portable::IpByte(from.sin_addr.s_addr, 3),
 					(unsigned int)ntohs(from.sin_port)
 				);
-				sendto((SOCKET)_probeSockets[p], reply, (int)strlen(reply), 0, (sockaddr*)&from, fromLen);
+				sendto((sf4e::Portable::Socket)_probeSockets[p], reply, (int)strlen(reply), 0, (sockaddr*)&from, fromLen);
 			}
 		}
 	}
@@ -382,7 +387,7 @@ int SessionServer::Step()
 				Lobby* lobby = registry.FindByKey(request.lobby.key);
 				int seat = -1;
 				if (lobby) {
-					uint64_t now = GetTickCount64();
+					uint64_t now = sf4e::Portable::NowMs();
 					for (auto hIter = lobby->pendingHandoffs.begin(); hIter != lobby->pendingHandoffs.end(); hIter++) {
 						if (hIter->token == request.handoff) {
 							if (now - hIter->issuedAtMs <= HANDOFF_TTL_MS) {
@@ -707,7 +712,7 @@ int SessionServer::Step()
 			}
 
 			sender.challengeTarget = request.target;
-			sender.challengeSentAtMs = GetTickCount64();
+			sender.challengeSentAtMs = sf4e::Portable::NowMs();
 
 			SessionProtocol::ChallengeEvent event;
 			event.from = sender.data.name;
@@ -779,7 +784,7 @@ int SessionServer::Step()
 			if (request.enabled && p.lobbyKey.empty()) {
 				if (!p.lookingForMatch) {
 					p.lookingForMatch = true;
-					p.lookingSinceMs = GetTickCount64();
+					p.lookingSinceMs = sf4e::Portable::NowMs();
 				}
 			}
 			else {
@@ -799,7 +804,7 @@ int SessionServer::Step()
 
 			Peer& peer = peerIter->second;
 
-			uint64_t now = GetTickCount64();
+			uint64_t now = sf4e::Portable::NowMs();
 			uint64_t oldest = peer.chatStamps[peer.chatStampIdx];
 			if (oldest != 0 && (now - oldest) < CHAT_RATE_WINDOW_MS) {
 				spdlog::debug("Server: rate limiting chat from \"{}\"", peer.data.name);
@@ -1074,7 +1079,7 @@ int SessionServer::Step()
 			// both sides route GGPO through the relay. Needs the relay
 			// socket bound and both seats to be game connections.
 			lobby.match.relayEndpoint.clear();
-			if ((SOCKET)_relaySocket != INVALID_SOCKET && lobby.members.size() >= 2) {
+			if ((sf4e::Portable::Socket)_relaySocket != sf4e::Portable::kInvalidSocket && lobby.members.size() >= 2) {
 				bool needsRelay = false;
 				for (int seat = 0; seat < 2; seat++) {
 					auto pIter = peers.find(lobby.members[seat].conn);
@@ -1110,7 +1115,7 @@ int SessionServer::Step()
 				Lobby::PendingHandoff pending;
 				pending.token = GenerateHandoffToken();
 				pending.seat = seat;
-				pending.issuedAtMs = GetTickCount64();
+				pending.issuedAtMs = sf4e::Portable::NowMs();
 				lobby.pendingHandoffs.push_back(pending);
 
 				SessionProtocol::MatchHandoff handoffMsg;
@@ -1231,7 +1236,7 @@ void SessionServer::RespondChallengeResult(HSteamNetConnection conn, const std::
 }
 
 void SessionServer::StepMatchmaking() {
-	uint64_t now = GetTickCount64();
+	uint64_t now = sf4e::Portable::NowMs();
 
 	// Expire unanswered challenges.
 	for (auto iter = peers.begin(); iter != peers.end(); iter++) {
@@ -1306,13 +1311,13 @@ void SessionServer::RemoveFromLobby(HSteamNetConnection conn) {
 int SessionServer::Close()
 {
 	for (int p = 0; p < 2; p++) {
-		if ((SOCKET)_probeSockets[p] != INVALID_SOCKET) {
-			closesocket((SOCKET)_probeSockets[p]);
+		if ((sf4e::Portable::Socket)_probeSockets[p] != sf4e::Portable::kInvalidSocket) {
+			sf4e::Portable::CloseSocket((sf4e::Portable::Socket)_probeSockets[p]);
 			_probeSockets[p] = (uintptr_t)~0;
 		}
 	}
-	if ((SOCKET)_relaySocket != INVALID_SOCKET) {
-		closesocket((SOCKET)_relaySocket);
+	if ((sf4e::Portable::Socket)_relaySocket != sf4e::Portable::kInvalidSocket) {
+		sf4e::Portable::CloseSocket((sf4e::Portable::Socket)_relaySocket);
 		_relaySocket = (uintptr_t)~0;
 	}
 	_relayPairs.clear();

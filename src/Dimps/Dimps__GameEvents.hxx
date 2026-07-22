@@ -8,6 +8,7 @@
 #include "Dimps__Event.hxx"
 #include "Dimps__Game.hxx"
 #include "Dimps__Platform.hxx"
+#include "Dimps__Wire.hxx"
 
 namespace Dimps {
 	namespace GameEvents {
@@ -174,17 +175,10 @@ namespace Dimps {
 		};
 
 		struct VsMode : Dimps::Event::EventBaseWithEC {
-			struct ConfirmedCharaConditions {
-				BYTE charaID;
-				BYTE costume;
-				BYTE color;
-				BYTE _unused;
-				BYTE personalAction;
-				BYTE winQuote;
-				BYTE ultraCombo;
-				BYTE handicap;
-				BYTE unc_edition;
-			};
+			// Defined in Dimps__Wire.hxx (windows.h-free, byte-identical)
+			// so the session protocol can carry it on Linux; aliased here
+			// so game-side code keeps its original name for it.
+			typedef Wire::ConfirmedCharaConditions ConfirmedCharaConditions;
 
 			struct ConfirmedPlayerConditions {
 				BYTE pad[316];
@@ -249,17 +243,7 @@ namespace Dimps {
 			static __staticMethods staticMethods;
 		};
 
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
-			VsMode::ConfirmedCharaConditions,
-			charaID,
-			costume,
-			color,
-			_unused,
-			personalAction,
-			winQuote,
-			ultraCombo,
-			handicap,
-			unc_edition
-		);
+		// ConfirmedCharaConditions' JSON form lives with its definition
+		// in Dimps__Wire.hxx.
 	}
 }

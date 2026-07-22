@@ -3,13 +3,12 @@
 #include <windows.h>
 #include <nlohmann/json.hpp>
 
+// FixedPoint (and its JSON form) lives in Dimps__Wire.hxx so the
+// session layer can carry it without <windows.h>.
+#include "Dimps__Wire.hxx"
+
 namespace Dimps {
 	namespace Math {
-		struct FixedPoint {
-			unsigned short fractional;
-			short integral; // Might be unsigned? Not entirely sure
-		};
-
 		struct Vec4F {
 			float x;
 			float y;
@@ -22,7 +21,5 @@ namespace Dimps {
 		};
 
 		float FixedToFloat(FixedPoint* fp);
-
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixedPoint, fractional, integral);
 	}
 }

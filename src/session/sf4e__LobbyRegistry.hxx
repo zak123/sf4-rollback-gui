@@ -6,7 +6,7 @@
 
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
 
-#include "../Dimps/Dimps__Math.hxx"
+#include "../Dimps/Dimps__Wire.hxx"
 #include "sf4e__SessionProtocol.hxx"
 
 namespace sf4e {

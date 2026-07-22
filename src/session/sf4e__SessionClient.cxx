@@ -1,18 +1,24 @@
 #include <string>
 #include <utility>
 
-#include <windows.h>
-
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
+
+// The snapshot machinery below walks located game memory through the
+// Dimps/sf4e layers, which only exist in the Windows game process. On
+// Linux (the dedicated server and its smoke test) those paths compile
+// out; clients there never enable snapshots.
+#ifdef _WIN32
+#include <windows.h>
 #include <ggponet.h>
 
 #include "../Dimps/Dimps.hxx"
 #include "../Dimps/Dimps__Game__Battle__System.hxx"
 
 #include "../sf4e/sf4e__Game__Battle__System.hxx"
+#endif
 
 #include "sf4e__SessionClient.hxx"
 #include "sf4e__SessionProtocol.hxx"
@@ -20,8 +26,10 @@
 using nlohmann::json;
 
 namespace SessionProtocol = sf4e::SessionProtocol;
+#ifdef _WIN32
 using rSystem = Dimps::Game::Battle::System;
 using fSystem = sf4e::Game::Battle::System;
+#endif
 using sf4e::SessionClient;
 using sf4e::SessionProtocol::LobbyReady;
 
@@ -405,6 +413,11 @@ int SessionClient::Step()
 			_callbacks.OnBattleSynced(this, _callbacks);
 		}
 		else if (type == SessionProtocol::MT_BATTLE_SNAPSHOT) {
+#ifndef _WIN32
+			// Snapshots only mean anything inside the game process.
+			spdlog::debug("Client: ignoring battle snapshot (no game memory here)");
+			continue;
+#else
 			SessionProtocol::BattleSnapshot m;
 			try {
 				msg.get_to(m);
@@ -449,6 +462,7 @@ int SessionClient::Step()
 				}
 				pendingRemoteSnapshots.emplace(m.snapshot.frameIdx, m.snapshot);
 			}
+#endif
 		}
 		else if (type == SessionProtocol::MT_FORWARD) {
 			spdlog::debug("Received forwarded message: {}", msg.dump());
@@ -460,6 +474,7 @@ int SessionClient::Step()
 
 	// Send all our outstanding local snapshots and compare any to pending
 	// snapshots.
+#ifdef _WIN32
 	if (_snapshotsEnabled) {
 		int mostRecentPredictiveFrame = (
 			rSystem::GetNumFramesSimulated_FixedPoint(rSystem::staticMethods.GetSingleton())->integral
@@ -520,6 +535,7 @@ int SessionClient::Step()
 			}
 		}
 	}
+#endif
 
 	return 0;
 }
@@ -731,7 +747,7 @@ EResult SessionClient::PreBattle_SetEnv(uint32_t rngSeed)
 	return result;
 }
 
-EResult SessionClient::PreBattle_SetChara(const Dimps::GameEvents::VsMode::ConfirmedCharaConditions& chara)
+EResult SessionClient::PreBattle_SetChara(const Dimps::GameEvents::Wire::ConfirmedCharaConditions& chara)
 {
 	SessionProtocol::PreBattleSetChara msg;
 	msg.chara = chara;

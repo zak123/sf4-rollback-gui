@@ -7,12 +7,16 @@ name: build
 # the VPS self-updater matches on.
 on:
   push:
-    branches: [ build ]
+    branches: [ build, linux-server ]
   pull_request:
   workflow_dispatch:
 
 jobs:
   build:
+    # Pushes to linux-server only exercise the linux job below; the
+    # full Windows build still runs for the build branch, PRs, and
+    # manual dispatch.
+    if: github.event_name != 'push' || github.ref_name == 'build'
     runs-on: windows-latest
     timeout-minutes: 90
     env:
@@ -109,3 +113,56 @@ jobs:
         with:
           name: sf4-rollback-gui-server
           path: dist/sf4-rollback-gui-server.zip
+
+  # The dedicated server also builds on Linux (cheaper always-on
+  # hosting). Only Session, Lobbyd, and the smoke test exist there; the
+  # smoke test is the correctness gate for the port.
+  linux-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
+      VCPKG_ROOT: /opt/vcpkg-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export Actions cache environment for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Check out vcpkg
+        run: git clone https://github.com/microsoft/vcpkg /opt/vcpkg-ci
+
+      - name: Bootstrap vcpkg
+        run: /opt/vcpkg-ci/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Configure
+        run: >
+          cmake -B build-linux -S .
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg-ci/scripts/buildsystems/vcpkg.cmake
+
+      - name: Build
+        run: cmake --build build-linux --parallel
+
+      - name: Session smoke test
+        timeout-minutes: 5
+        run: build-linux/SessionSmokeTest
+
+      - name: Package
+        run: |
+          mkdir -p stage dist
+          cp build-linux/Lobbyd stage/
+          # The GNS shared library and its deps ship beside the binary;
+          # the systemd unit sets LD_LIBRARY_PATH to the install dir.
+          cp build-linux/vcpkg_installed/x64-linux/lib/*.so* stage/ 2>/dev/null || true
+          tar -C stage -czf dist/sf4-rollback-gui-server-linux.tar.gz .
+
+      - name: Upload Linux server bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: sf4-rollback-gui-server-linux
+          path: dist/sf4-rollback-gui-server-linux.tar.gz

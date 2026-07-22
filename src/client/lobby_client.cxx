@@ -39,6 +39,7 @@
 #include <GameNetworkingSockets/steam/isteamnetworkingutils.h>
 
 #include "../Dimps/Dimps__Game__Battle.hxx"
+#include "../Dimps/Dimps__GameEvents.hxx"
 #include "../session/sf4e__Resolve.hxx"
 #include "../session/sf4e__SessionClient.hxx"
 #include "../session/sf4e__SessionProtocol.hxx"

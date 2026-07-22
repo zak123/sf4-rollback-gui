@@ -8,7 +8,7 @@
 #include <GameNetworkingSockets/steam/steamnetworkingsockets.h>
 #include <nlohmann/json.hpp>
 
-#include "../Dimps/Dimps__Math.hxx"
+#include "../Dimps/Dimps__Wire.hxx"
 #include "sf4e__LobbyRegistry.hxx"
 #include "sf4e__SessionProtocol.hxx"
 

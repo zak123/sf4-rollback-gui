@@ -1,4 +1,4 @@
-#include "../Dimps/Dimps__GameEvents.hxx"
+#include "../Dimps/Dimps__Wire.hxx"
 #include "sf4e__SessionProtocol.hxx"
 
 namespace sf4e {
@@ -38,7 +38,7 @@ namespace sf4e {
 			stageID = -1;
 			rngSeed = 0xffffffff;
 			relayEndpoint.clear();
-			memset(chara, 0, sizeof(Dimps::GameEvents::VsMode::ConfirmedCharaConditions) * 2);
+			memset(chara, 0, sizeof(Dimps::GameEvents::Wire::ConfirmedCharaConditions) * 2);
 		}
 
 		bool MatchData::IsAllReady() {
