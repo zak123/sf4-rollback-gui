@@ -37,6 +37,25 @@ static BOOL WINAPI OnConsoleCtrl(DWORD dwCtrlType) {
 	}
 }
 
+static LONG WINAPI OnUnhandledException(EXCEPTION_POINTERS* pInfo) {
+	// The supervisor restarts the process; make sure the log names the
+	// crash first. The first live server crash died silently, leaving
+	// only the next boot banner- undebuggable.
+	if (pInfo && pInfo->ExceptionRecord) {
+		uintptr_t addr = (uintptr_t)pInfo->ExceptionRecord->ExceptionAddress;
+		uintptr_t base = (uintptr_t)GetModuleHandleW(NULL);
+		spdlog::critical(
+			"FATAL: unhandled exception {:#010x} at {:#010x} (module base {:#010x}, offset {:#x})",
+			(uint32_t)pInfo->ExceptionRecord->ExceptionCode,
+			addr,
+			base,
+			addr >= base ? addr - base : 0
+		);
+		spdlog::shutdown();
+	}
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
 static void OnGNSDebugOutput(ESteamNetworkingSocketsDebugOutputType eType, const char* pszMsg) {
 	if (eType <= k_ESteamNetworkingSocketsDebugOutputType_Warning) {
 		spdlog::warn("GNS: {}", pszMsg);
@@ -124,6 +143,7 @@ int main(int argc, char** argv) {
 	CLI11_PARSE(app, argc, argv);
 
 	SetUpLogging(bVerbose);
+	SetUnhandledExceptionFilter(OnUnhandledException);
 
 	SteamDatagramErrMsg errMsg;
 	if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
