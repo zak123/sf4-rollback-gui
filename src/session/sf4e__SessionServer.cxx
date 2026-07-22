@@ -951,6 +951,13 @@ int SessionServer::Step()
 				continue;
 			}
 			LobbyMember* member = lobby->FindMember(conn);
+			if (!member) {
+				// The peer's lobby key can outlive its seat (handoffs,
+				// removals)- a battle_loaded from such a connection
+				// must not crash the server.
+				spdlog::info("Server: sender {} sent battle loaded, but holds no seat in lobby {}", conn, lobby->id.key);
+				continue;
+			}
 			member->data.flags |= SessionProtocol::MF_BATTLE_LOADED;
 
 			bool allLoaded = true;

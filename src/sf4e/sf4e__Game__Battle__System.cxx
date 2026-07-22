@@ -580,6 +580,18 @@ void fSystem::OnBattleFlow_BattleStart(System* s) {
         bSynctestPending = false;
         StartSynctest(nSynctestPendingDistance, nSynctestPendingSeed);
     }
+    if (sf4e::UserApp::netplay && !ggpo) {
+        // A lobby battle is starting without a GGPO session: some flow
+        // (a native rematch, an unexpected menu path) reached a battle
+        // the netplay machinery never armed. Never play it out- each
+        // side would simulate alone.
+        sf4e::UserApp::AbortNetplay(
+            "The match restarted without netplay attached.\n\n"
+            "The game will now close- your lobby app will put you back "
+            "in the lobby."
+        );
+        return;
+    }
     if (nNextBattleStartFlowTarget > -1) {
         rSystem::staticMethods.SetBattleFlow(s, nNextBattleStartFlowTarget);
         nNextBattleStartFlowTarget = -1;
@@ -725,17 +737,24 @@ void fSystem::RecordAllToInternalMementos(rSystem* system, GameMementoKey::Memen
 
 
 void fSystem::AbortGgpoMatch(const char* szReason) {
-    // Adapted from Confetti3's SF4-Netplay-Launcher (MIT): failures
-    // mid-match used to pop a "will likely crash" message box and then
-    // usually did. Ending the battle through the game's own leaving
-    // flow keeps the process alive- the battle exits, battle_ended
-    // resets the lobby cycle, and the players can rematch.
+    // A dead match (desync, GGPO failure) cannot be resumed, and the
+    // first playtest that hit one proved that flowing the abort into
+    // the post-battle rematch path is fragile: the native rematch menu
+    // raced the in-process rematch machinery and restarted the battle
+    // WITHOUT a GGPO session- both players ghost-fighting alone. Exit
+    // the process cleanly instead: the notice dismisses itself and the
+    // lobby app re-seats the player for a fresh pairing.
     spdlog::error("GGPO match aborted: {}", szReason);
-    bUpdateAllowed = false;
-    rSystem* system = rSystem::staticMethods.GetSingleton();
-    if (system) {
-        *rSystem::GetReadyState(system) = rSystem::RS_ISLEAVING;
-    }
+    static char szNotice[512];
+    snprintf(
+        szNotice,
+        sizeof(szNotice),
+        "The match had to stop: %s.\n\n"
+        "The game will now close- your lobby app will put you back in "
+        "the lobby.",
+        szReason
+    );
+    sf4e::UserApp::AbortNetplay(szNotice);
 }
 
 void fSystem::StartGGPO(GGPOPlayer* inPlayers, int numPlayers, int port, int frameDelay, DWORD rngSeed) {

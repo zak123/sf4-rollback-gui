@@ -494,6 +494,22 @@ void fUserApp::StartServer(uint16 hostPort, std::string& identity, std::string& 
 static const uint64_t REMATCH_WAIT_TIMEOUT_MS = 60 * 1000;
 
 void fUserApp::StartRematch() {
+    // The in-place rematch injects into the live VS-mode event; if the
+    // post-battle flow went anywhere else (the playtest saw the native
+    // rematch menu appear here), a blind release would start a
+    // half-configured battle. Bail to the app instead- re-pairing
+    // through the lobby is the proven path.
+    char* vsModeQuery[] = { "VSMode" };
+    rVsMode* mode = (rVsMode*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsModeQuery, 1);
+    if (!mode) {
+        AbortNetplay(
+            "The rematch could not be set up in place.\n\n"
+            "The game will now close- your lobby app will put you back "
+            "in the lobby."
+        );
+        return;
+    }
+
     spdlog::info("Rematch: both sides ready, starting the next battle");
 
     // The same drive as OnReady's main-menu path, minus the menu
