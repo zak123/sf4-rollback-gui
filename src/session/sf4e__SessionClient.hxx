@@ -113,6 +113,11 @@ namespace sf4e {
 		// Round-trip ping to the session server in ms, or -1 while
 		// disconnected.
 		int GetPingMs();
+
+		// The server's self-reported version from hello_resp. Empty until
+		// the handshake lands, and still empty on servers that predate
+		// the field (which itself means "older than this build").
+		std::string _serverVersion;
 		
 		// Connection related data - public for testing
 		std::string _sidecarHash;

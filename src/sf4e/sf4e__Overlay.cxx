@@ -1856,6 +1856,50 @@ void DrawVsCharaSelectWindow(bool* pOpen) {
 	End();
 }
 
+// Every-frame logger for the native chara select: whenever a player's
+// pick bytes change, the new values land in the log. Exists so the
+// costume/color/ultra byte encodings can be verified by just flipping
+// options at a local-versus select and reading the log afterward- no
+// debug window transcription (docs/roster-names-research.md §5).
+static void LogVsCharaSelectChanges() {
+	// GetRootEvent is game code; only safe once the menu has been seen.
+	if (!fMainMenu::bAliveSeen) {
+		return;
+	}
+
+	static bool bHadInstance = false;
+	static BYTE last[2][4];
+
+	char* vsCharaSelectQuery[] = { "VSMode", "PreBattle", "CharaSelect" };
+	VsCharaSelect* charaSelect = (VsCharaSelect*)EventBaseWithEC::FindForegroundEvent(App::GetRootEvent(), vsCharaSelectQuery, 3);
+	if (!charaSelect) {
+		bHadInstance = false;
+		return;
+	}
+
+	VsCharaSelect::CharaSelectState* state = VsCharaSelect::GetState(charaSelect);
+	for (int i = 0; i < 2; i++) {
+		VsCharaSelect::PlayerConditions* c = &state->playerConditions[i];
+		BYTE cur[4] = {
+			*VsCharaSelect::PlayerConditions::GetColor(c),
+			*VsCharaSelect::PlayerConditions::GetCostume(c),
+			*VsCharaSelect::PlayerConditions::GetUltraCombo(c),
+			*VsCharaSelect::PlayerConditions::GetEdition(c),
+		};
+		if (bHadInstance && memcmp(cur, last[i], sizeof(cur)) == 0) {
+			continue;
+		}
+		memcpy(last[i], cur, sizeof(cur));
+		spdlog::info(
+			"CharaSelect P{}: chara={} color={} costume={} ultra={} edition={}",
+			i + 1,
+			VsCharaSelect::PlayerConditions::GetSelectedCharaAbbrev(c)->c_str(),
+			cur[0], cur[1], cur[2], cur[3]
+		);
+	}
+	bHadInstance = true;
+}
+
 void DrawVsStageSelectWindow(bool* pOpen) {
 	static char newStageCode[4];
 
@@ -2075,6 +2119,7 @@ void Overlay::DrawOverlay() {
 	NewFrame();
 
 	DrawHashOverlay();
+	LogVsCharaSelectChanges();
 	if (ImGui::IsMousePosValid() && ImGui::GetIO().MousePos.y < 200) {
 		if (BeginMainMenuBar()) {
 			if (BeginMenu("Eva")) {

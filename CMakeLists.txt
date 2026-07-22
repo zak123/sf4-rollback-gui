@@ -2,7 +2,7 @@ cmake_minimum_required (VERSION 3.20)
 
 project (
     sf4e
-    VERSION 0.1.4
+    VERSION 0.1.8
     DESCRIPTION "A process-inspection and modification tool for the Steam release of Ultra Street Fighter 4."
     HOMEPAGE_URL "https://gitlab.com/adanducci/sf4e"
 )
@@ -12,6 +12,10 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG")
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 add_compile_definitions(WIN32_LEAN_AND_MEAN)
+# The session handshake compares client and server versions to warn
+# players on stale builds, so the project VERSION above must keep being
+# bumped alongside releases.
+add_compile_definitions(SF4E_VERSION="${PROJECT_VERSION}")
 
 find_library(LIB_DETOURS "detours")
 find_package(CLI11 CONFIG REQUIRED)

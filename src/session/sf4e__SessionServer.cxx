@@ -337,6 +337,7 @@ int SessionServer::Step()
 				SessionProtocol::SessionHelloResp cidMsg;
 				cidMsg.cid.host = _identity;
 				cidMsg.cid.user = std::to_string(conn);
+				cidMsg.version = SF4E_VERSION;
 				cidMap[conn] = cidMsg.cid;
 				json resp = cidMsg;
 				Respond(conn, resp);

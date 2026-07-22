@@ -217,6 +217,11 @@ namespace sf4e {
 		struct SessionHelloResp {
 			MessageType type = MT_SESSION_HELLO_RESP;
 			ConnectionID cid;
+
+			// The server build's version, so clients can warn the player
+			// when they're on a stale release. Empty when talking to a
+			// server that predates the field.
+			std::string version;
 		};
 
 		struct SessionDataUpdate {
@@ -501,7 +506,23 @@ namespace sf4e {
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MatchData, readyMessageNum, chara, stageID, rngSeed, relayEndpoint);
 
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionHelloMsg, type);
-		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionHelloResp, type, cid);
+
+		// SessionHelloResp is serialized by hand: `version` is optional
+		// on the wire so hellos from servers predating it still parse.
+		inline void to_json(nlohmann::json& j, const SessionHelloResp& r) {
+			j = nlohmann::json{
+				{"type", r.type},
+				{"cid", r.cid},
+				{"version", r.version},
+			};
+		}
+
+		inline void from_json(const nlohmann::json& j, SessionHelloResp& r) {
+			j.at("type").get_to(r.type);
+			j.at("cid").get_to(r.cid);
+			r.version = j.value("version", std::string());
+		}
+
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionDataUpdate, type, lobbyData, matchData);
 		NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SessionJoinReject, type, result);
 

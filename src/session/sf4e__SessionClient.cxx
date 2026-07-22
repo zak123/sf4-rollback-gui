@@ -173,8 +173,15 @@ int SessionClient::Step()
 				spdlog::info("Client: couldn't deserialize CID?");
 				continue;
 			}
-			
+
 			_cid = cidMsg.cid;
+			_serverVersion = cidMsg.version;
+			if (_serverVersion != SF4E_VERSION) {
+				spdlog::warn(
+					"Client: server version \"{}\" != our version \"{}\"",
+					_serverVersion, SF4E_VERSION
+				);
+			}
 
 			SessionProtocol::SessionJoinRequest request;
 			request.sidecarHash = _sidecarHash;

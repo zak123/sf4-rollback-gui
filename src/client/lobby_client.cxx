@@ -9,6 +9,7 @@
 #define UNICODE
 #endif
 
+#include <algorithm>
 #include <deque>
 #include <float.h>
 #include <fstream>
@@ -61,6 +62,9 @@ void CleanupDeviceD3D();
 void ResetDevice();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+// The main window, for taskbar attention flashes from session callbacks.
+static HWND g_hWnd = nullptr;
+
 // -------------------------------------------------------------------
 // App state
 
@@ -82,7 +86,6 @@ struct App {
 	char szNewLobbyName[64] = { 0 };
 	int newLobbyRoundCountIdx = 1;
 	int newLobbyRoundTimeIdx = 2;
-	bool newLobbyEditionSelect = true;
 
 	rVsMode::ConfirmedCharaConditions myConditions;
 	int myCharaID = 0;
@@ -90,6 +93,10 @@ struct App {
 
 	std::deque<SessionProtocol::ChatEvent> chatLog;
 	std::deque<std::string> alerts;
+	// When the currently shown (front) alert appeared, for auto-expiry.
+	uint64_t alertFrontSince = 0;
+	// One version warning per connection, not one per hello.
+	bool bVersionWarned = false;
 	uint64_t nextListRefresh = 0;
 	bool bothReady = false;
 	bool gameLaunched = false;
@@ -110,6 +117,10 @@ struct App {
 
 	// Quickmatch toggle, mirroring the server's queue flag.
 	bool bLooking = false;
+
+	// Silences the notification sound (challenges, quickmatch). The
+	// taskbar flash stays on- that's the quiet channel.
+	bool bMuted = false;
 
 	std::mt19937 rand;
 
@@ -166,6 +177,7 @@ static void LoadConfig() {
 		g_app.myConditions.costume = (BYTE)j.value("costume", 0);
 		g_app.myConditions.ultraCombo = (BYTE)j.value("ultra", 0);
 		g_app.stageID = j.value("stageID", 0);
+		g_app.bMuted = j.value("muted", false);
 	}
 	catch (...) {
 		// A mangled config just means defaults.
@@ -192,6 +204,7 @@ static void SaveConfig() {
 		j["costume"] = (int)g_app.myConditions.costume;
 		j["ultra"] = (int)g_app.myConditions.ultraCombo;
 		j["stageID"] = g_app.stageID;
+		j["muted"] = g_app.bMuted;
 		std::ofstream f(path);
 		f << j.dump(2);
 	}
@@ -200,35 +213,69 @@ static void SaveConfig() {
 }
 
 // -------------------------------------------------------------------
+// Alerts
+//
+// One alert shows at a time and auto-expires; everything pushed here
+// also belongs in the log, which is where the full history lives.
+// Consecutive duplicates collapse so a retry loop can't stack the
+// queue with the same line.
+
+static void PushAlert(const std::string& text) {
+	if (!g_app.alerts.empty() && g_app.alerts.back() == text) {
+		return;
+	}
+	g_app.alerts.push_back(text);
+}
+
+// -------------------------------------------------------------------
 // Session client callbacks
 
 static void OnError(SessionClient::ErrorType errType, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
+	// Lobby-level rejections during the automatic post-game rejoin are
+	// part of a retry loop- surface only the loop's terminal outcome,
+	// not every attempt.
+	bool bRejoining = g_app.rejoinAttempts > 0;
+
 	switch (errType) {
 	case SessionClient::SCE_JOIN_REJECTED_HASH_INVALID:
-		g_app.alerts.push_back("Rejected by server: version mismatch");
+		PushAlert("Rejected by server: version mismatch");
 		break;
 	case SessionClient::SCE_JOIN_REJECTED_NAME_TAKEN:
-		g_app.alerts.push_back("Rejected by server: that name is taken");
+		PushAlert("Rejected by server: that name is taken");
 		break;
 	case SessionClient::SCE_JOIN_REJECTED_LOBBY_FULL:
-		g_app.alerts.push_back("Could not join: lobby is full");
+		if (bRejoining) {
+			spdlog::info("Rejoin attempt bounced: lobby full, retrying");
+			break;
+		}
+		PushAlert("Could not join: lobby is full");
 		break;
 	case SessionClient::SCE_JOIN_REJECTED_NO_SUCH_LOBBY:
-		g_app.alerts.push_back("Could not join: lobby no longer exists");
 		// No sense retrying a rejoin into a dead lobby.
+		if (bRejoining) {
+			spdlog::info("Rejoin abandoned: the lobby is gone");
+			g_app.rejoinAttempts = 0;
+			break;
+		}
 		g_app.rejoinAttempts = 0;
+		PushAlert("Could not join: lobby no longer exists");
 		break;
 	case SessionClient::SCE_JOIN_REJECTED_ALREADY_IN_LOBBY:
-		g_app.alerts.push_back("Could not join: already in a lobby");
+		if (bRejoining) {
+			spdlog::info("Rejoin attempt bounced: already seated");
+			g_app.rejoinAttempts = 0;
+			break;
+		}
+		PushAlert("Could not join: already in a lobby");
 		break;
 	case SessionClient::SCE_JOIN_REJECTED_REQUEST_INVALID:
-		g_app.alerts.push_back("Rejected by server: bad request- version mismatch?");
+		PushAlert("Rejected by server: bad request- version mismatch?");
 		break;
 	case SessionClient::SCE_JOIN_REJECTED_SERVER_FULL:
-		g_app.alerts.push_back("The server is full- try again later");
+		PushAlert("The server is full- try again later");
 		break;
 	default:
-		g_app.alerts.push_back("Unknown session error");
+		PushAlert("Unknown session error");
 		break;
 	}
 }
@@ -243,7 +290,7 @@ static void OnBattleSynced(SessionClient* const c, const SessionClient::Callback
 
 static void OnLobbyCreated(SessionProtocol::JoinResult result, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
 	if (result != SessionProtocol::JOIN_OK) {
-		g_app.alerts.push_back("Could not create lobby");
+		PushAlert("Could not create lobby");
 	}
 }
 
@@ -267,7 +314,7 @@ static void OnMatchHandoff(const SessionProtocol::MatchHandoff& handoff, Session
 	PathRemoveFileSpecW(szDir);
 	PathCombineW(szLauncher, szDir, L"Launcher.exe");
 	if (!PathFileExistsW(szLauncher)) {
-		g_app.alerts.push_back("Match is ready, but Launcher.exe isn't next to this app!");
+		PushAlert("Match is ready, but Launcher.exe isn't next to this app!");
 		return;
 	}
 
@@ -300,11 +347,12 @@ static void OnMatchHandoff(const SessionProtocol::MatchHandoff& handoff, Session
 		g_app.hGameProcess = pi.hProcess;
 		g_app.rejoinTarget = handoff.lobby;
 		g_app.gameLaunched = true;
-		g_app.alerts.push_back("Match ready- launching the game! Press a button in-game to bind your controller.");
+		// No alert: the room card's NOW PLAYING banner carries the
+		// controller-binding instruction for as long as it's relevant.
 		spdlog::info("Launched game for lobby {} handoff", handoff.lobby.key);
 	}
 	else {
-		g_app.alerts.push_back("Match is ready, but the game could not be launched");
+		PushAlert("Match is ready, but the game could not be launched");
 		spdlog::error("CreateProcess for Launcher.exe failed: {}", GetLastError());
 	}
 }
@@ -323,37 +371,53 @@ static void PlayNotifySound() {
 	PlaySoundW(szWav, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 }
 
+// Something needs the player: sound (unless muted) plus a taskbar
+// flash when the window is in the background. The flash runs until
+// the window comes back to the foreground.
+static void NotifyAttention() {
+	if (!g_app.bMuted) {
+		PlayNotifySound();
+	}
+	if (g_hWnd && GetForegroundWindow() != g_hWnd) {
+		FLASHWINFO fi = { 0 };
+		fi.cbSize = sizeof(fi);
+		fi.hwnd = g_hWnd;
+		fi.dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG;
+		FlashWindowEx(&fi);
+	}
+}
+
 static void OnChallengeEvent(const SessionProtocol::ChallengeEvent& event, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
 	strncpy_s(g_app.szChallengeFrom, event.from.c_str(), _TRUNCATE);
 	g_app.challengeReceivedAt = GetTickCount64();
-	PlayNotifySound();
+	NotifyAttention();
 }
 
 static void OnChallengeResult(const SessionProtocol::ChallengeResultMsg& result, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
 	switch (result.result) {
 	case SessionProtocol::CR_ACCEPTED:
-		g_app.alerts.push_back(result.target + " accepted- get ready!");
+		PushAlert(result.target + " accepted- get ready!");
 		break;
 	case SessionProtocol::CR_DECLINED:
-		g_app.alerts.push_back(result.target + " declined the challenge");
+		PushAlert(result.target + " declined the challenge");
 		break;
 	case SessionProtocol::CR_EXPIRED:
-		g_app.alerts.push_back(result.target + " didn't answer");
+		PushAlert(result.target + " didn't answer");
 		break;
 	case SessionProtocol::CR_BUSY:
-		g_app.alerts.push_back(result.target + " is busy");
+		PushAlert(result.target + " is busy");
 		break;
 	case SessionProtocol::CR_OFFLINE:
-		g_app.alerts.push_back(result.target + " went offline");
+		PushAlert(result.target + " went offline");
 		break;
 	}
 	g_app.szChallengeTarget[0] = 0;
 }
 
 static void OnMatchmakeEvent(const SessionProtocol::MatchmakeEvent& event, SessionClient* const c, const SessionClient::Callbacks& callbacks) {
-	g_app.alerts.push_back("Matched with " + event.opponent + "!");
+	PushAlert("Matched with " + event.opponent + "!");
 	g_app.bLooking = false;
-	PlayNotifySound();
+	NotifyAttention();
 }
 
 static SessionClient::Callbacks kCallbacks = {
@@ -491,7 +555,7 @@ static void FixGameSettings() {
 			// something unexpected- punt to the game's own options
 			// instead of guessing where the line belongs.
 			spdlog::warn("Game config has no {} line", setting.key);
-			g_app.alerts.push_back(
+			PushAlert(
 				std::string("Couldn't fix ") + setting.key +
 				"- set it in the game's PC graphic options"
 			);
@@ -519,7 +583,7 @@ static void FixGameSettings() {
 	}
 	if (!bWrote) {
 		spdlog::warn("Could not write the game config");
-		g_app.alerts.push_back(
+		PushAlert(
 			"Couldn't write the game's config.ini- fix the settings in "
 			"the game's PC options instead"
 		);
@@ -568,7 +632,7 @@ static void DrawGameSettingsLight() {
 static void ConnectToServer() {
 	SteamNetworkingIPAddr addr;
 	if (!sf4e::Net::ResolveHostPort(g_app.szServerAddr, addr)) {
-		g_app.alerts.push_back(
+		PushAlert(
 			"Could not find that server- the address should look like "
 			"play.example.com:23450 or 203.0.113.7:23450"
 		);
@@ -589,6 +653,7 @@ static void ConnectToServer() {
 	g_app.szChallengeFrom[0] = 0;
 	g_app.szChallengeTarget[0] = 0;
 	g_app.nextListRefresh = 0;
+	g_app.bVersionWarned = false;
 	g_app.screen = SCREEN_SESSION;
 	SaveConfig();
 }
@@ -602,7 +667,7 @@ static void DropToLogin(const char* reason) {
 	g_app.szChallengeFrom[0] = 0;
 	g_app.szChallengeTarget[0] = 0;
 	if (reason) {
-		g_app.alerts.push_back(reason);
+		PushAlert(reason);
 	}
 }
 
@@ -636,7 +701,9 @@ static void TickGameWatch() {
 		g_app.hGameProcess = NULL;
 		g_app.gameLaunched = false;
 		g_app.bothReady = false;
-		g_app.alerts.push_back("The game closed- returning you to the lobby.");
+		// Closing the game is the normal end of every match- the app
+		// visibly returning to the lobby is the whole message.
+		spdlog::info("The game closed- re-seating into the lobby");
 		g_app.rejoinAttempts = 5;
 		g_app.nextRejoinAt = 0;
 	}
@@ -757,10 +824,29 @@ static bool AccentButton(const char* label, const ImVec2& size = ImVec2(0, 0)) {
 	return pressed;
 }
 
+static const uint64_t ALERT_LIFETIME_MS = 8000;
+
 static void DrawAlerts() {
 	if (g_app.alerts.empty()) {
+		g_app.alertFrontSince = 0;
 		return;
 	}
+
+	// Alerts self-dismiss so a burst (a failed match can produce a few)
+	// never turns into a click-through queue; OK just skips the wait.
+	uint64_t now = GetTickCount64();
+	if (g_app.alertFrontSince == 0) {
+		g_app.alertFrontSince = now;
+	}
+	if (now - g_app.alertFrontSince > ALERT_LIFETIME_MS) {
+		g_app.alerts.pop_front();
+		g_app.alertFrontSince = 0;
+		if (g_app.alerts.empty()) {
+			return;
+		}
+		g_app.alertFrontSince = now;
+	}
+
 	ImU32 red = IM_COL32(255, 80, 80, 255);
 	ImGui::PushStyleColor(ImGuiCol_Text, red);
 	ImGui::TextWrapped("%s", g_app.alerts.front().c_str());
@@ -768,6 +854,7 @@ static void DrawAlerts() {
 	ImGui::SameLine();
 	if (ImGui::SmallButton("OK")) {
 		g_app.alerts.pop_front();
+		g_app.alertFrontSince = 0;
 	}
 	ImGui::Separator();
 }
@@ -786,6 +873,8 @@ static void DrawLoginScreen() {
 	ImGui::SetWindowFontScale(1.7f);
 	ImGui::TextUnformatted("sf4e");
 	ImGui::SetWindowFontScale(1.0f);
+	ImGui::SameLine();
+	ImGui::TextDisabled("v" SF4E_VERSION);
 	ImGui::TextDisabled("Rollback netplay lobby for Ultra Street Fighter IV");
 	ImGui::Spacing();
 	ImGui::Separator();
@@ -892,15 +981,123 @@ static void DrawLobbyBrowser() {
 		ImGui::InputText("Lobby name", g_app.szNewLobbyName, sizeof(g_app.szNewLobbyName));
 		ImGui::Combo("Rounds", &g_app.newLobbyRoundCountIdx, "1\0003\0005\0007\000");
 		ImGui::Combo("Round time", &g_app.newLobbyRoundTimeIdx, "30\00060\00099\000");
-		ImGui::Checkbox("Edition select", &g_app.newLobbyEditionSelect);
 		if (ImGui::Button("Create", ImVec2(120, 0))) {
+			// Edition select is not offered here: the app pins every pick
+			// to the USF4 edition, and Lobbyd's own lobbies (quickmatch,
+			// challenges) run with edition select on- so created lobbies
+			// pass true to match them.
 			c.Lobby_Create(
 				std::string(g_app.szNewLobbyName),
-				g_app.newLobbyEditionSelect,
+				true,
 				kRoundCounts[g_app.newLobbyRoundCountIdx].first,
 				kRoundTimes[g_app.newLobbyRoundTimeIdx].first
 			);
 		}
+	}
+}
+
+// The character and stage combos list alphabetically, but the Roster
+// tables are in game-ID order and must stay that way (the IDs are what
+// the game consumes and what the config persists). displayOrder[row] =
+// the game ID shown at that row; the combos convert on the way in/out.
+static int g_charaDisplayOrder[Roster::NUM_CHARACTERS];
+static int g_stageDisplayOrder[Roster::NUM_STAGES];
+
+static void InitDisplayOrders() {
+	for (int i = 0; i < Roster::NUM_CHARACTERS; i++) {
+		g_charaDisplayOrder[i] = i;
+	}
+	for (int i = 0; i < Roster::NUM_STAGES; i++) {
+		g_stageDisplayOrder[i] = i;
+	}
+	std::sort(g_charaDisplayOrder, g_charaDisplayOrder + Roster::NUM_CHARACTERS, [](int a, int b) {
+		return strcmp(Roster::characterNames[a], Roster::characterNames[b]) < 0;
+	});
+	std::sort(g_stageDisplayOrder, g_stageDisplayOrder + Roster::NUM_STAGES, [](int a, int b) {
+		return strcmp(Roster::stageNames[a], Roster::stageNames[b]) < 0;
+	});
+}
+
+static const char* CharaRowName(void*, int row) {
+	return Roster::characterNames[g_charaDisplayOrder[row]];
+}
+
+static const char* StageRowName(void*, int row) {
+	return Roster::stageNames[g_stageDisplayOrder[row]];
+}
+
+// Draws a combo over displayOrder rows while *id stays a game ID.
+static void DrawSortedCombo(const char* label, int* id, int* displayOrder, const char* (*rowName)(void*, int), int count) {
+	int row = 0;
+	for (int i = 0; i < count; i++) {
+		if (displayOrder[i] == *id) {
+			row = i;
+			break;
+		}
+	}
+	ImGui::Combo(label, &row, rowName, nullptr, count);
+	*id = displayOrder[row];
+}
+
+// Named pick widgets, backed by the Roster tables. These write the
+// raw bytes the game consumes (docs/roster-names-research.md §4):
+// everything 0-based; ultra 0/1/2 = U1/U2/W. Out-of-range persisted
+// values are healed here before READY can send them.
+static void DrawPickCombos() {
+	rVsMode::ConfirmedCharaConditions& cond = g_app.myConditions;
+	int charaID = g_app.myCharaID;
+
+	{
+		char u1[64], u2[64];
+		snprintf(u1, sizeof(u1), "U1: %s", Roster::ultra1Names[charaID]);
+		snprintf(u2, sizeof(u2), "U2: %s", Roster::ultra2Names[charaID]);
+		const char* items[3] = { u1, u2, "W: both (reduced damage)" };
+		int sel = cond.ultraCombo < 3 ? cond.ultraCombo : 0;
+		ImGui::Combo("Ultra", &sel, items, 3);
+		cond.ultraCombo = (BYTE)sel;
+	}
+
+	int costumeCount = Roster::costumeCounts[charaID];
+	{
+		// Slot order: Default, Alt 1..N, then the 2014 trio- always
+		// Vacation, Wild, Horror, and always the last three slots.
+		char alt[3][8];
+		const char* items[7];
+		int n = 0;
+		items[n++] = "Default";
+		for (int a = 1; a <= costumeCount - 4; a++) {
+			snprintf(alt[a - 1], sizeof(alt[0]), "Alt %d", a);
+			items[n++] = alt[a - 1];
+		}
+		items[n++] = "Vacation";
+		items[n++] = "Wild";
+		items[n++] = "Horror";
+		int sel = cond.costume < costumeCount ? cond.costume : 0;
+		ImGui::Combo("Costume", &sel, items, costumeCount);
+		cond.costume = (BYTE)sel;
+	}
+
+	{
+		// Every costume has colors 1-10 plus two stylized takes on
+		// color 1; the 2014 trio adds 13-22.
+		static char labels[22][16];
+		static const char* items[22];
+		if (!items[0]) {
+			for (int i = 0; i < 22; i++) {
+				if (i == 10 || i == 11) {
+					snprintf(labels[i], sizeof(labels[0]), "%d (stylized)", i + 1);
+				}
+				else {
+					snprintf(labels[i], sizeof(labels[0]), "%d", i + 1);
+				}
+				items[i] = labels[i];
+			}
+		}
+		bool has2014Colors = cond.costume >= costumeCount - 3;
+		int colorCount = has2014Colors ? 22 : 12;
+		int sel = cond.color < colorCount ? cond.color : 0;
+		ImGui::Combo("Color", &sel, items, colorCount);
+		cond.color = (BYTE)sel;
 	}
 }
 
@@ -914,10 +1111,9 @@ static void DrawLobbyPanel() {
 	ImGui::TextUnformatted(c._lobbyData.name.c_str());
 	ImGui::SetWindowFontScale(1.0f);
 	ImGui::TextDisabled(
-		"%d rounds / %ds%s",
+		"%d rounds / %ds",
 		c._lobbyData.roundCount,
-		(int)c._lobbyData.roundTime.integral,
-		c._lobbyData.editionSelect ? " / edition select" : ""
+		(int)c._lobbyData.roundTime.integral
 	);
 	ImGui::Spacing();
 
@@ -974,13 +1170,10 @@ static void DrawLobbyPanel() {
 			ImGui::TextUnformatted("Ready! Waiting for your opponent.");
 		}
 		else {
-			ImGui::Combo("Character", &g_app.myCharaID, Roster::characterNames, Roster::NUM_CHARACTERS);
-			static const int stepSize = 1;
-			ImGui::InputScalar("Color", ImGuiDataType_U8, &g_app.myConditions.color, &stepSize);
-			ImGui::InputScalar("Costume", ImGuiDataType_U8, &g_app.myConditions.costume, &stepSize);
-			ImGui::InputScalar("Ultra Combo", ImGuiDataType_U8, &g_app.myConditions.ultraCombo, &stepSize);
+			DrawSortedCombo("Character", &g_app.myCharaID, g_charaDisplayOrder, CharaRowName, Roster::NUM_CHARACTERS);
+			DrawPickCombos();
 			if (mySide == 0) {
-				ImGui::Combo("Stage", &g_app.stageID, Roster::stageNames, Roster::NUM_STAGES);
+				DrawSortedCombo("Stage", &g_app.stageID, g_stageDisplayOrder, StageRowName, Roster::NUM_STAGES);
 			}
 			ImGui::Spacing();
 			if (AccentButton("READY", ImVec2(-FLT_MIN, 34))) {
@@ -995,7 +1188,7 @@ static void DrawLobbyPanel() {
 					c.Lobby_Ready();
 				}
 				else {
-					g_app.alerts.push_back("Could not send match setup");
+					PushAlert("Could not send match setup");
 				}
 			}
 		}
@@ -1054,8 +1247,9 @@ static void DrawPlayersPane() {
 			ImGui::SameLine(ImGui::GetContentRegionAvail().x - 24.0f);
 			if (ImGui::SmallButton("vs")) {
 				if (c.Challenge_Send(entry.name) == k_EResultOK) {
+					// The challenge corner shows the outgoing state;
+					// no alert needed.
 					strncpy_s(g_app.szChallengeTarget, entry.name.c_str(), _TRUNCATE);
-					g_app.alerts.push_back("Challenge sent to " + entry.name);
 				}
 			}
 		}
@@ -1119,6 +1313,56 @@ static void DrawChatPane() {
 	}
 }
 
+// The challenge corner, bottom-left. It always exists- an empty state
+// tells players where challenges will land before the first one ever
+// arrives- and an incoming challenge turns it into the accept prompt.
+static void DrawChallengeBox() {
+	SessionClient& c = *g_app.client;
+
+	ImGui::TextUnformatted("Challenges");
+	ImGui::SameLine(ImGui::GetContentRegionMax().x - 64.0f);
+	if (ImGui::Checkbox("Mute", &g_app.bMuted)) {
+		SaveConfig();
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Silence the notification sound- the taskbar still flashes");
+	}
+	ImGui::Separator();
+
+	if (g_app.szChallengeFrom[0] != 0) {
+		int secondsLeft = (int)(30 - (GetTickCount64() - g_app.challengeReceivedAt) / 1000);
+		if (secondsLeft < 0) {
+			secondsLeft = 0;
+		}
+		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 200, 60, 255));
+		ImGui::Text("%s wants to fight!", g_app.szChallengeFrom);
+		ImGui::PopStyleColor();
+		if (AccentButton("Accept", ImVec2(110, 0))) {
+			c.Challenge_Answer(std::string(g_app.szChallengeFrom), true);
+			g_app.szChallengeFrom[0] = 0;
+			return;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Decline", ImVec2(80, 0))) {
+			c.Challenge_Answer(std::string(g_app.szChallengeFrom), false);
+			g_app.szChallengeFrom[0] = 0;
+			return;
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("%ds", secondsLeft);
+		return;
+	}
+
+	if (g_app.szChallengeTarget[0] != 0) {
+		ImGui::Text("Challenge sent to %s", g_app.szChallengeTarget);
+		ImGui::TextDisabled("Waiting for an answer...");
+		return;
+	}
+
+	ImGui::TextDisabled("No challenges right now.");
+	ImGui::TextDisabled("Hit \"vs\" on a player to send one.");
+}
+
 static void DrawSessionScreen() {
 	SessionClient& c = *g_app.client;
 	bool inLobby = !c._lobbyData.id.key.empty();
@@ -1135,6 +1379,22 @@ static void DrawSessionScreen() {
 		return;
 	}
 
+	// The handshake landed: if the server build differs from ours, say
+	// so once as an alert, and keep a tag in the header for the rest of
+	// the session. An empty server version is itself an old server.
+	bool bVersionMismatch = c._serverVersion != SF4E_VERSION;
+	if (!g_app.bVersionWarned) {
+		g_app.bVersionWarned = true;
+		if (bVersionMismatch) {
+			PushAlert(
+				c._serverVersion.empty()
+				? "This app is newer than the server- versions should match. Check the releases page."
+				: "Version mismatch: the server runs v" + c._serverVersion +
+				", this app is v" SF4E_VERSION ". Get the matching build from the releases page."
+			);
+		}
+	}
+
 	// Header strip: who you are, where you are, how the connection
 	// feels (+R shows ping up front), and the settings light.
 	ImGui::Text("%s", c._name.c_str());
@@ -1142,9 +1402,30 @@ static void DrawSessionScreen() {
 	int ping = c.GetPingMs();
 	if (ping >= 0) {
 		ImGui::TextDisabled("@ %s  |  %d ms", g_app.szServerAddr, ping);
+		if (ImGui::IsItemHovered()) {
+			// The relay runs on the same host as the lobby server, so
+			// this one number covers both roles.
+			ImGui::SetTooltip(
+				"Ping to the lobby server.\n"
+				"Matches normally connect straight to your opponent, but when\n"
+				"that isn't possible (strict NAT), match traffic is relayed\n"
+				"through this server- so this ping matters for relayed matches."
+			);
+		}
 	}
 	else {
 		ImGui::TextDisabled("@ %s", g_app.szServerAddr);
+	}
+	if (bVersionMismatch) {
+		ImGui::SameLine(0.0f, 24.0f);
+		ImGui::TextColored(ImVec4(0.92f, 0.78f, 0.25f, 1.0f), "version mismatch");
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Server: %s\nThis app: %s",
+				c._serverVersion.empty() ? "(older than " SF4E_VERSION ")" : c._serverVersion.c_str(),
+				SF4E_VERSION
+			);
+		}
 	}
 	ImGui::SameLine(0.0f, 24.0f);
 	DrawGameSettingsLight();
@@ -1155,24 +1436,6 @@ static void DrawSessionScreen() {
 	}
 	ImGui::Separator();
 	DrawAlerts();
-
-	// An incoming challenge gets an actionable banner.
-	if (g_app.szChallengeFrom[0] != 0) {
-		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 200, 60, 255));
-		ImGui::Text("%s wants to fight!", g_app.szChallengeFrom);
-		ImGui::PopStyleColor();
-		ImGui::SameLine();
-		if (AccentButton("Accept")) {
-			c.Challenge_Answer(std::string(g_app.szChallengeFrom), true);
-			g_app.szChallengeFrom[0] = 0;
-		}
-		ImGui::SameLine();
-		if (ImGui::SmallButton("Decline")) {
-			c.Challenge_Answer(std::string(g_app.szChallengeFrom), false);
-			g_app.szChallengeFrom[0] = 0;
-		}
-		ImGui::Separator();
-	}
 
 	// Seated anywhere means the server dropped us from the quickmatch
 	// queue; mirror that.
@@ -1192,12 +1455,24 @@ static void DrawSessionScreen() {
 		}
 	}
 
-	ImGui::BeginChild("left_pane", ImVec2(360, 0), true);
-	if (inLobby) {
-		DrawLobbyPanel();
-	}
-	else {
-		DrawLobbyBrowser();
+	// Left column: the lobby zone on top, the challenge corner pinned
+	// to the bottom- otherwise-unused space that challenges can claim
+	// without shoving the rest of the layout around.
+	const float challengeBoxH = 98.0f;
+	ImGui::BeginChild("left_col", ImVec2(360, 0), false);
+	{
+		float spacing = ImGui::GetStyle().ItemSpacing.y;
+		ImGui::BeginChild("left_pane", ImVec2(0, -(challengeBoxH + spacing)), true);
+		if (inLobby) {
+			DrawLobbyPanel();
+		}
+		else {
+			DrawLobbyBrowser();
+		}
+		ImGui::EndChild();
+		ImGui::BeginChild("challenge_box", ImVec2(0, challengeBoxH), true);
+		DrawChallengeBox();
+		ImGui::EndChild();
 	}
 	ImGui::EndChild();
 	ImGui::SameLine();
@@ -1271,6 +1546,7 @@ int WINAPI wWinMain(
 	CLI11_PARSE(app, argc, argv);
 
 	SetUpLogging(bShowConsole);
+	InitDisplayOrders();
 	LoadConfig();
 
 	SteamDatagramErrMsg errMsg;
@@ -1295,6 +1571,7 @@ int WINAPI wWinMain(
 	WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"sf4e lobby client", nullptr };
 	::RegisterClassExW(&wc);
 	HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"sf4e lobby", WS_OVERLAPPEDWINDOW, 100, 100, 1024, 640, nullptr, nullptr, wc.hInstance, nullptr);
+	g_hWnd = hwnd;
 
 	if (!CreateDeviceD3D(hwnd))
 	{
