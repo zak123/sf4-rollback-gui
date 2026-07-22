@@ -109,6 +109,10 @@ namespace sf4e {
 
 		// Public for testing
 		EResult Send(nlohmann::json& msg, int64_t* outMessageNum);
+
+		// Round-trip ping to the session server in ms, or -1 while
+		// disconnected.
+		int GetPingMs();
 		
 		// Connection related data - public for testing
 		std::string _sidecarHash;

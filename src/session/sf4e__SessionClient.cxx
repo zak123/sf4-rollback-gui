@@ -788,3 +788,14 @@ void SessionClient::SteamNetConnectionStatusChangedCallback(SteamNetConnectionSt
 	SessionClient* instance = (SessionClient *)SteamNetworkingSockets()->GetConnectionUserData(pInfo->m_hConn);
 	instance->OnSteamNetConnectionStatusChanged(pInfo);
 }
+
+int SessionClient::GetPingMs() {
+	if (_conn == k_HSteamNetConnection_Invalid) {
+		return -1;
+	}
+	SteamNetConnectionRealTimeStatus_t status;
+	if (_interface->GetConnectionRealTimeStatus(_conn, &status, 0, nullptr) != k_EResultOK) {
+		return -1;
+	}
+	return status.m_nPing;
+}

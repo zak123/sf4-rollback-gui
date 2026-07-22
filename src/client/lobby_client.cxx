@@ -10,6 +10,7 @@
 #endif
 
 #include <deque>
+#include <float.h>
 #include <fstream>
 #include <memory>
 #include <random>
@@ -670,6 +671,91 @@ static void TickChallengeExpiry() {
 
 // -------------------------------------------------------------------
 // UI
+//
+// Layout and flow borrow from +R's post-rollback lobby rework, the
+// best-regarded lobby system in the genre: quick match is the front
+// door (one open pool, one button), rooms show who's inside and who's
+// playing at a glance, and player status is a colored dot rather than
+// a sentence.
+
+static const ImVec4 kAccent = ImVec4(0.89f, 0.23f, 0.18f, 1.00f);
+static const ImVec4 kAccentHover = ImVec4(0.94f, 0.30f, 0.25f, 1.00f);
+static const ImVec4 kAccentActive = ImVec4(0.75f, 0.18f, 0.14f, 1.00f);
+static const ImU32 kDotLounge = IM_COL32(150, 150, 158, 255);
+static const ImU32 kDotLooking = IM_COL32(80, 160, 255, 255);
+static const ImU32 kDotInLobby = IM_COL32(235, 190, 60, 255);
+static const ImU32 kDotInMatch = IM_COL32(235, 70, 60, 255);
+static const ImU32 kDotReady = IM_COL32(70, 220, 100, 255);
+
+static void SetupTheme() {
+	ImGuiStyle& style = ImGui::GetStyle();
+	ImGui::StyleColorsDark(&style);
+	style.WindowRounding = 0.0f;
+	style.ChildRounding = 6.0f;
+	style.FrameRounding = 4.0f;
+	style.PopupRounding = 4.0f;
+	style.GrabRounding = 4.0f;
+	style.TabRounding = 4.0f;
+	style.WindowPadding = ImVec2(12, 12);
+	style.FramePadding = ImVec2(8, 5);
+	style.ItemSpacing = ImVec2(8, 6);
+	style.ChildBorderSize = 1.0f;
+
+	ImVec4* colors = style.Colors;
+	colors[ImGuiCol_WindowBg] = ImVec4(0.07f, 0.07f, 0.09f, 1.00f);
+	colors[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.10f, 0.12f, 1.00f);
+	colors[ImGuiCol_PopupBg] = ImVec4(0.10f, 0.10f, 0.12f, 1.00f);
+	colors[ImGuiCol_Border] = ImVec4(0.20f, 0.20f, 0.24f, 1.00f);
+	colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.15f, 0.18f, 1.00f);
+	colors[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.20f, 0.24f, 1.00f);
+	colors[ImGuiCol_FrameBgActive] = ImVec4(0.24f, 0.24f, 0.29f, 1.00f);
+	colors[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.15f, 1.00f);
+	colors[ImGuiCol_Button] = ImVec4(0.19f, 0.19f, 0.23f, 1.00f);
+	colors[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.26f, 0.31f, 1.00f);
+	colors[ImGuiCol_ButtonActive] = ImVec4(0.31f, 0.31f, 0.37f, 1.00f);
+	colors[ImGuiCol_Header] = ImVec4(0.19f, 0.19f, 0.23f, 1.00f);
+	colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.26f, 0.31f, 1.00f);
+	colors[ImGuiCol_HeaderActive] = ImVec4(0.31f, 0.31f, 0.37f, 1.00f);
+	colors[ImGuiCol_Tab] = ImVec4(0.12f, 0.12f, 0.15f, 1.00f);
+	colors[ImGuiCol_TabHovered] = kAccentHover;
+	colors[ImGuiCol_TabActive] = ImVec4(0.55f, 0.17f, 0.14f, 1.00f);
+	colors[ImGuiCol_CheckMark] = kAccent;
+	colors[ImGuiCol_SliderGrab] = kAccent;
+	colors[ImGuiCol_SeparatorHovered] = kAccentHover;
+	colors[ImGuiCol_TableRowBgAlt] = ImVec4(0.12f, 0.12f, 0.14f, 0.60f);
+	colors[ImGuiCol_TextSelectedBg] = ImVec4(0.89f, 0.23f, 0.18f, 0.35f);
+	colors[ImGuiCol_NavHighlight] = kAccent;
+}
+
+// A filled status dot inline with text.
+static void StatusDot(ImU32 color) {
+	float h = ImGui::GetTextLineHeight();
+	ImVec2 p = ImGui::GetCursorScreenPos();
+	ImGui::GetWindowDrawList()->AddCircleFilled(
+		ImVec2(p.x + h * 0.5f, p.y + h * 0.6f), h * 0.3f, color
+	);
+	ImGui::Dummy(ImVec2(h, h));
+}
+
+static ImU32 PresenceDotColor(SessionProtocol::PresenceStatus status) {
+	switch (status) {
+	case SessionProtocol::PS_LOOKING: return kDotLooking;
+	case SessionProtocol::PS_IN_LOBBY: return kDotInLobby;
+	case SessionProtocol::PS_IN_MATCH: return kDotInMatch;
+	default: return kDotLounge;
+	}
+}
+
+// Accent-styled primary action button.
+static bool AccentButton(const char* label, const ImVec2& size = ImVec2(0, 0)) {
+	ImGui::PushStyleColor(ImGuiCol_Button, kAccent);
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kAccentHover);
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, kAccentActive);
+	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+	bool pressed = ImGui::Button(label, size);
+	ImGui::PopStyleColor(4);
+	return pressed;
+}
 
 static void DrawAlerts() {
 	if (g_app.alerts.empty()) {
@@ -687,16 +773,36 @@ static void DrawAlerts() {
 }
 
 static void DrawLoginScreen() {
-	ImGui::TextUnformatted("sf4e lobby");
+	// A centered card- the front door should read like a game.
+	ImVec2 avail = ImGui::GetContentRegionAvail();
+	const float cardW = 400.0f;
+	const float cardH = 330.0f;
+	float x = (avail.x - cardW) * 0.5f;
+	float y = avail.y * 0.16f;
+	ImGui::SetCursorPosX(x > 0 ? x : 0);
+	ImGui::SetCursorPosY(y > 16 ? y : 16);
+
+	ImGui::BeginChild("login_card", ImVec2(cardW, cardH), true);
+	ImGui::SetWindowFontScale(1.7f);
+	ImGui::TextUnformatted("sf4e");
+	ImGui::SetWindowFontScale(1.0f);
+	ImGui::TextDisabled("Rollback netplay lobby for Ultra Street Fighter IV");
+	ImGui::Spacing();
 	ImGui::Separator();
+	ImGui::Spacing();
 	DrawAlerts();
 
-	ImGui::InputText("Name", g_app.szName, sizeof(g_app.szName));
-	ImGui::InputText("Server", g_app.szServerAddr, sizeof(g_app.szServerAddr));
+	ImGui::TextUnformatted("Name");
+	ImGui::SetNextItemWidth(-FLT_MIN);
+	ImGui::InputText("##name", g_app.szName, sizeof(g_app.szName));
+	ImGui::TextUnformatted("Server");
+	ImGui::SetNextItemWidth(-FLT_MIN);
+	ImGui::InputText("##server", g_app.szServerAddr, sizeof(g_app.szServerAddr));
+	ImGui::Spacing();
 
 	bool valid = g_app.szName[0] != 0;
 	ImGui::BeginDisabled(!valid);
-	if (ImGui::Button("Connect", ImVec2(120, 0))) {
+	if (AccentButton("CONNECT", ImVec2(-FLT_MIN, 34))) {
 		ConnectToServer();
 	}
 	ImGui::EndDisabled();
@@ -704,12 +810,33 @@ static void DrawLoginScreen() {
 		ImGui::TextDisabled("Pick a name first");
 	}
 
+	ImGui::Spacing();
 	ImGui::Separator();
+	ImGui::Spacing();
 	DrawGameSettingsLight();
+	ImGui::EndChild();
 }
 
 static void DrawLobbyBrowser() {
 	SessionClient& c = *g_app.client;
+
+	// The +R lesson: quick match is the front door- one open pool, one
+	// button, state you can see.
+	if (g_app.bLooking) {
+		char szLabel[64];
+		snprintf(szLabel, sizeof(szLabel), "SEARCHING (%d in queue) - tap to cancel", c._lookingCount);
+		if (AccentButton(szLabel, ImVec2(-FLT_MIN, 36))) {
+			g_app.bLooking = false;
+			c.Matchmake_Set(false);
+		}
+	}
+	else {
+		if (ImGui::Button("FIND MATCH", ImVec2(-FLT_MIN, 36))) {
+			g_app.bLooking = true;
+			c.Matchmake_Set(true);
+		}
+	}
+	ImGui::Spacing();
 
 	ImGui::TextUnformatted("Lobbies");
 	ImGui::SameLine();
@@ -719,20 +846,36 @@ static void DrawLobbyBrowser() {
 
 	if (ImGui::BeginTable("lobbies", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
-		ImGui::TableSetupColumn("Players", ImGuiTableColumnFlags_WidthFixed, 60.0f);
-		ImGui::TableSetupColumn("##join", ImGuiTableColumnFlags_WidthFixed, 50.0f);
+		ImGui::TableSetupColumn("Players", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+		ImGui::TableSetupColumn("##join", ImGuiTableColumnFlags_WidthFixed, 52.0f);
 		for (int i = 0; i < (int)c._lobbyListing.size(); i++) {
 			SessionProtocol::LobbyListEntry& entry = c._lobbyListing[i];
+			bool full = entry.playerCount >= entry.capacity;
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
 			ImGui::TextUnformatted(entry.name.c_str());
+			// Rooms show who's inside at a glance (hover), like +R.
+			if (ImGui::IsItemHovered() && !entry.players.empty()) {
+				std::string who;
+				for (size_t p = 0; p < entry.players.size(); p++) {
+					if (p) {
+						who += ", ";
+					}
+					who += entry.players[p];
+				}
+				ImGui::SetTooltip("%s", who.c_str());
+			}
 			ImGui::TableNextColumn();
-			ImGui::Text("%d/%d", entry.playerCount, entry.capacity);
+			if (full) {
+				ImGui::TextDisabled("%d/%d", entry.playerCount, entry.capacity);
+			}
+			else {
+				ImGui::Text("%d/%d", entry.playerCount, entry.capacity);
+			}
 			ImGui::TableNextColumn();
-			bool full = entry.playerCount >= entry.capacity;
 			ImGui::BeginDisabled(full);
 			ImGui::PushID(i);
-			if (ImGui::SmallButton("Join")) {
+			if (ImGui::SmallButton(full ? "Full" : "Join")) {
 				c.Lobby_Join(entry.id);
 			}
 			ImGui::PopID();
@@ -741,22 +884,23 @@ static void DrawLobbyBrowser() {
 		ImGui::EndTable();
 	}
 	if (c._lobbyListing.empty()) {
-		ImGui::TextDisabled("No open lobbies- create one!");
+		ImGui::TextDisabled("No open lobbies- FIND MATCH or create one.");
 	}
 
-	ImGui::Separator();
-	ImGui::TextUnformatted("Create a lobby");
-	ImGui::InputText("Lobby name", g_app.szNewLobbyName, sizeof(g_app.szNewLobbyName));
-	ImGui::Combo("Rounds", &g_app.newLobbyRoundCountIdx, "1\0003\0005\0007\000");
-	ImGui::Combo("Round time", &g_app.newLobbyRoundTimeIdx, "30\00060\00099\000");
-	ImGui::Checkbox("Edition select", &g_app.newLobbyEditionSelect);
-	if (ImGui::Button("Create")) {
-		c.Lobby_Create(
-			std::string(g_app.szNewLobbyName),
-			g_app.newLobbyEditionSelect,
-			kRoundCounts[g_app.newLobbyRoundCountIdx].first,
-			kRoundTimes[g_app.newLobbyRoundTimeIdx].first
-		);
+	ImGui::Spacing();
+	if (ImGui::CollapsingHeader("Create a lobby")) {
+		ImGui::InputText("Lobby name", g_app.szNewLobbyName, sizeof(g_app.szNewLobbyName));
+		ImGui::Combo("Rounds", &g_app.newLobbyRoundCountIdx, "1\0003\0005\0007\000");
+		ImGui::Combo("Round time", &g_app.newLobbyRoundTimeIdx, "30\00060\00099\000");
+		ImGui::Checkbox("Edition select", &g_app.newLobbyEditionSelect);
+		if (ImGui::Button("Create", ImVec2(120, 0))) {
+			c.Lobby_Create(
+				std::string(g_app.szNewLobbyName),
+				g_app.newLobbyEditionSelect,
+				kRoundCounts[g_app.newLobbyRoundCountIdx].first,
+				kRoundTimes[g_app.newLobbyRoundTimeIdx].first
+			);
+		}
 	}
 }
 
@@ -765,86 +909,105 @@ static void DrawLobbyPanel() {
 	std::vector<SessionProtocol::MemberData>& members = c._lobbyData.members;
 	int mySide = MySide();
 
-	ImGui::Text("Lobby: %s", c._lobbyData.name.c_str());
+	// Room header, +R player-room style: name, rules, then the seats.
+	ImGui::SetWindowFontScale(1.15f);
+	ImGui::TextUnformatted(c._lobbyData.name.c_str());
+	ImGui::SetWindowFontScale(1.0f);
 	ImGui::TextDisabled(
-		"%d rounds / %ds / edition select %s",
+		"%d rounds / %ds%s",
 		c._lobbyData.roundCount,
 		(int)c._lobbyData.roundTime.integral,
-		c._lobbyData.editionSelect ? "on" : "off"
+		c._lobbyData.editionSelect ? " / edition select" : ""
 	);
+	ImGui::Spacing();
+
+	// The room always answers "who is playing right now?"
+	if (g_app.bothReady && members.size() >= 2) {
+		ImGui::BeginChild("now_playing", ImVec2(0, 46), true);
+		StatusDot(kDotInMatch);
+		ImGui::SameLine();
+		ImGui::Text("NOW PLAYING  %s  vs  %s", members[0].name.c_str(), members[1].name.c_str());
+		ImGui::TextDisabled(
+			g_app.gameLaunched
+			? "Press a button in-game to bind your controller."
+			: "Waiting for the game to launch..."
+		);
+		ImGui::EndChild();
+		ImGui::Spacing();
+	}
+
+	// Seat slots.
+	for (int i = 0; i < 2; i++) {
+		ImGui::PushID(i);
+		ImGui::BeginChild("seat", ImVec2(0, 46), true);
+		if (i < (int)members.size()) {
+			bool isMe = members[i].connId == c._cid;
+			bool ready = c._matchData.readyMessageNum[i] > -1;
+			StatusDot(ready ? kDotReady : kDotInLobby);
+			ImGui::SameLine();
+			ImGui::Text("P%d  %s", i + 1, members[i].name.c_str());
+			if (isMe) {
+				ImGui::SameLine();
+				ImGui::TextColored(kAccent, "(you)");
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled(ready ? "- ready" : "- picking");
+		}
+		else {
+			StatusDot(kDotLounge);
+			ImGui::SameLine();
+			ImGui::TextDisabled("P%d  waiting for opponent...", i + 1);
+		}
+		ImGui::EndChild();
+		ImGui::PopID();
+	}
+	ImGui::Spacing();
+
+	if (!g_app.bothReady) {
+		if (mySide < 0 || mySide > 1) {
+			ImGui::TextDisabled("Watching- the seats are taken.");
+		}
+		else if (c._outstandingReadyRequestNumber > -1) {
+			ImGui::TextUnformatted("Waiting for server...");
+		}
+		else if (c._matchData.readyMessageNum[mySide] > -1) {
+			ImGui::TextUnformatted("Ready! Waiting for your opponent.");
+		}
+		else {
+			ImGui::Combo("Character", &g_app.myCharaID, Roster::characterNames, Roster::NUM_CHARACTERS);
+			static const int stepSize = 1;
+			ImGui::InputScalar("Color", ImGuiDataType_U8, &g_app.myConditions.color, &stepSize);
+			ImGui::InputScalar("Costume", ImGuiDataType_U8, &g_app.myConditions.costume, &stepSize);
+			ImGui::InputScalar("Ultra Combo", ImGuiDataType_U8, &g_app.myConditions.ultraCombo, &stepSize);
+			if (mySide == 0) {
+				ImGui::Combo("Stage", &g_app.stageID, Roster::stageNames, Roster::NUM_STAGES);
+			}
+			ImGui::Spacing();
+			if (AccentButton("READY", ImVec2(-FLT_MIN, 34))) {
+				g_app.myConditions.charaID = g_app.myCharaID;
+				SaveConfig();
+				bool ok = c.PreBattle_SetChara(g_app.myConditions) == k_EResultOK;
+				if (ok && mySide == 0) {
+					ok = ok && c.PreBattle_SetEnv(g_app.rand()) == k_EResultOK;
+					ok = ok && c.PreBattle_SetStage(g_app.stageID) == k_EResultOK;
+				}
+				if (ok) {
+					c.Lobby_Ready();
+				}
+				else {
+					g_app.alerts.push_back("Could not send match setup");
+				}
+			}
+		}
+	}
+
+	ImGui::Spacing();
 	if (ImGui::Button("Leave lobby")) {
 		c.Lobby_Leave();
 		g_app.bothReady = false;
 		// Leaving on purpose also cancels any pending auto-rejoin.
 		g_app.rejoinAttempts = 0;
 		g_app.rejoinTarget = { "", "" };
-		return;
-	}
-	ImGui::Separator();
-
-	for (int i = 0; i < 2; i++) {
-		const char* label = i == 0 ? "P1" : "P2";
-		if (i < (int)members.size()) {
-			const char* isMe = members[i].connId == c._cid ? " (you)" : "";
-			const char* readyState = c._matchData.readyMessageNum[i] > -1 ? "Ready!" : "picking...";
-			ImGui::Text("%s: %s%s - %s", label, members[i].name.c_str(), isMe, readyState);
-		}
-		else {
-			ImGui::TextDisabled("%s: waiting for opponent", label);
-		}
-	}
-	ImGui::Separator();
-
-	if (g_app.bothReady) {
-		if (g_app.gameLaunched) {
-			ImGui::TextWrapped(
-				"Game launched! Press a button on your controller at the "
-				"title screen to bind it, then the match starts on its own."
-			);
-		}
-		else {
-			ImGui::TextWrapped("Both players are ready! Waiting for the game to launch...");
-		}
-		return;
-	}
-
-	if (mySide < 0 || mySide > 1) {
-		ImGui::TextDisabled("Spectating- waiting for players");
-		return;
-	}
-
-	if (c._outstandingReadyRequestNumber > -1) {
-		ImGui::TextUnformatted("Waiting for server...");
-		return;
-	}
-	if (c._matchData.readyMessageNum[mySide] > -1) {
-		ImGui::TextUnformatted("Ready! Waiting for opponent.");
-		return;
-	}
-
-	ImGui::Combo("Character", &g_app.myCharaID, Roster::characterNames, Roster::NUM_CHARACTERS);
-	static const int stepSize = 1;
-	ImGui::InputScalar("Color", ImGuiDataType_U8, &g_app.myConditions.color, &stepSize);
-	ImGui::InputScalar("Costume", ImGuiDataType_U8, &g_app.myConditions.costume, &stepSize);
-	ImGui::InputScalar("Ultra Combo", ImGuiDataType_U8, &g_app.myConditions.ultraCombo, &stepSize);
-	if (mySide == 0) {
-		ImGui::Combo("Stage", &g_app.stageID, Roster::stageNames, Roster::NUM_STAGES);
-	}
-
-	if (ImGui::Button("Ready", ImVec2(120, 0))) {
-		g_app.myConditions.charaID = g_app.myCharaID;
-		SaveConfig();
-		bool ok = c.PreBattle_SetChara(g_app.myConditions) == k_EResultOK;
-		if (ok && mySide == 0) {
-			ok = ok && c.PreBattle_SetEnv(g_app.rand()) == k_EResultOK;
-			ok = ok && c.PreBattle_SetStage(g_app.stageID) == k_EResultOK;
-		}
-		if (ok) {
-			c.Lobby_Ready();
-		}
-		else {
-			g_app.alerts.push_back("Could not send match setup");
-		}
 	}
 }
 
@@ -861,17 +1024,7 @@ static void DrawPlayersPane() {
 	SessionClient& c = *g_app.client;
 	bool inLounge = c._lobbyData.id.key.empty();
 
-	ImGui::Text("Players (%d)", (int)c._presence.size());
-	ImGui::Separator();
-
-	ImGui::BeginDisabled(!inLounge);
-	if (ImGui::Checkbox("Looking for match", &g_app.bLooking)) {
-		c.Matchmake_Set(g_app.bLooking);
-	}
-	ImGui::EndDisabled();
-	if (g_app.bLooking) {
-		ImGui::TextDisabled("Searching- %d in queue", c._lookingCount);
-	}
+	ImGui::Text("Online - %d", (int)c._presence.size());
 	ImGui::Separator();
 
 	ImGui::BeginChild("players_scroll", ImVec2(0, 0));
@@ -884,18 +1037,28 @@ static void DrawPlayersPane() {
 			(entry.status == SessionProtocol::PS_LOUNGE || entry.status == SessionProtocol::PS_LOOKING);
 
 		ImGui::PushID(i);
-		if (challengeable && ImGui::SmallButton("vs")) {
-			if (c.Challenge_Send(entry.name) == k_EResultOK) {
-				strncpy_s(g_app.szChallengeTarget, entry.name.c_str(), _TRUNCATE);
-				g_app.alerts.push_back("Challenge sent to " + entry.name);
-			}
+		StatusDot(PresenceDotColor(entry.status));
+		ImGui::SameLine();
+		if (isMe) {
+			ImGui::Text("%s", entry.name.c_str());
+			ImGui::SameLine();
+			ImGui::TextColored(kAccent, "(you)");
+		}
+		else {
+			ImGui::TextUnformatted(entry.name.c_str());
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("%s", PresenceStatusLabel(entry.status));
 		}
 		if (challengeable) {
-			ImGui::SameLine();
+			ImGui::SameLine(ImGui::GetContentRegionAvail().x - 24.0f);
+			if (ImGui::SmallButton("vs")) {
+				if (c.Challenge_Send(entry.name) == k_EResultOK) {
+					strncpy_s(g_app.szChallengeTarget, entry.name.c_str(), _TRUNCATE);
+					g_app.alerts.push_back("Challenge sent to " + entry.name);
+				}
+			}
 		}
-		ImGui::Text("%s%s", entry.name.c_str(), isMe ? " (you)" : "");
-		ImGui::SameLine();
-		ImGui::TextDisabled("- %s", PresenceStatusLabel(entry.status));
 		ImGui::PopID();
 	}
 	ImGui::EndChild();
@@ -972,14 +1135,24 @@ static void DrawSessionScreen() {
 		return;
 	}
 
-	ImGui::Text("Connected as %s", c._name.c_str());
+	// Header strip: who you are, where you are, how the connection
+	// feels (+R shows ping up front), and the settings light.
+	ImGui::Text("%s", c._name.c_str());
 	ImGui::SameLine();
+	int ping = c.GetPingMs();
+	if (ping >= 0) {
+		ImGui::TextDisabled("@ %s  |  %d ms", g_app.szServerAddr, ping);
+	}
+	else {
+		ImGui::TextDisabled("@ %s", g_app.szServerAddr);
+	}
+	ImGui::SameLine(0.0f, 24.0f);
+	DrawGameSettingsLight();
+	ImGui::SameLine(ImGui::GetContentRegionMax().x - 84.0f);
 	if (ImGui::SmallButton("Disconnect")) {
 		DropToLogin(nullptr);
 		return;
 	}
-	ImGui::SameLine(0.0f, 24.0f);
-	DrawGameSettingsLight();
 	ImGui::Separator();
 	DrawAlerts();
 
@@ -989,7 +1162,7 @@ static void DrawSessionScreen() {
 		ImGui::Text("%s wants to fight!", g_app.szChallengeFrom);
 		ImGui::PopStyleColor();
 		ImGui::SameLine();
-		if (ImGui::SmallButton("Accept")) {
+		if (AccentButton("Accept")) {
 			c.Challenge_Answer(std::string(g_app.szChallengeFrom), true);
 			g_app.szChallengeFrom[0] = 0;
 		}
@@ -1019,7 +1192,7 @@ static void DrawSessionScreen() {
 		}
 	}
 
-	ImGui::BeginChild("left_pane", ImVec2(340, 0), true);
+	ImGui::BeginChild("left_pane", ImVec2(360, 0), true);
 	if (inLobby) {
 		DrawLobbyPanel();
 	}
@@ -1028,7 +1201,7 @@ static void DrawSessionScreen() {
 	}
 	ImGui::EndChild();
 	ImGui::SameLine();
-	ImGui::BeginChild("chat_pane", ImVec2(-210, 0), true);
+	ImGui::BeginChild("chat_pane", ImVec2(-230, 0), true);
 	DrawChatPane();
 	ImGui::EndChild();
 	ImGui::SameLine();
@@ -1140,7 +1313,7 @@ int WINAPI wWinMain(
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-	ImGui::StyleColorsDark();
+	SetupTheme();
 
 	ImGui_ImplWin32_Init(hwnd);
 	ImGui_ImplDX9_Init(g_pd3dDevice);
