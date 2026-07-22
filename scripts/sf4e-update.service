@@ -1,0 +1,8 @@
+# Oneshot unit the sf4e-update.timer fires; runs the self-updater as
+# root so it can stop/start the sf4e-lobbyd service.
+[Unit]
+Description=sf4e server self-update check
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sf4e/linux-update.sh

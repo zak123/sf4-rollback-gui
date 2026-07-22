@@ -114,6 +114,15 @@ jobs:
           name: sf4-rollback-gui-server
           path: dist/sf4-rollback-gui-server.zip
 
+      # Published as its own release asset too, so the Linux server's
+      # updater can pin the matching game build without downloading a
+      # Windows bundle.
+      - name: Upload sidecar hash
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-hash
+          path: msvc-build/ci/sidecar-hash.txt
+
   # The dedicated server also builds on Linux (cheaper always-on
   # hosting). Only Session, Lobbyd, and the smoke test exist there; the
   # smoke test is the correctness gate for the port.
@@ -157,8 +166,13 @@ jobs:
           mkdir -p stage dist
           cp build-linux/Lobbyd stage/
           # The GNS shared library and its deps ship beside the binary;
-          # the systemd unit sets LD_LIBRARY_PATH to the install dir.
+          # the launch wrapper sets LD_LIBRARY_PATH to the install dir.
           cp build-linux/vcpkg_installed/x64-linux/lib/*.so* stage/ 2>/dev/null || true
+          # Deploy kit: launch wrapper, self-updater, systemd units.
+          cp scripts/run-lobbyd.sh scripts/linux-update.sh \
+             scripts/sf4e-lobbyd.service scripts/sf4e-update.service \
+             scripts/sf4e-update.timer stage/
+          chmod +x stage/run-lobbyd.sh stage/linux-update.sh
           tar -C stage -czf dist/sf4-rollback-gui-server-linux.tar.gz .
 
       - name: Upload Linux server bundle

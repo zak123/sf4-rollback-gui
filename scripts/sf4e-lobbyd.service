@@ -1,0 +1,20 @@
+# systemd unit for a deployed Lobbyd. Install:
+#   sudo cp sf4e-lobbyd.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now sf4e-lobbyd
+# Assumes the server bundle lives in /opt/sf4e, run as user "sf4e".
+[Unit]
+Description=sf4e dedicated lobby server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=sf4e
+WorkingDirectory=/opt/sf4e
+ExecStart=/opt/sf4e/run-lobbyd.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

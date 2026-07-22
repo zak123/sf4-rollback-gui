@@ -1,0 +1,13 @@
+# Install alongside sf4e-update.service:
+#   sudo cp sf4e-update.service sf4e-update.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now sf4e-update.timer
+[Unit]
+Description=Run the sf4e server updater every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target
