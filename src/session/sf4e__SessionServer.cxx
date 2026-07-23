@@ -53,6 +53,66 @@ static std::string GenerateHandoffToken() {
 
 SessionServer* SessionServer::s_pCallbackInstance;
 
+std::string SessionServer::PairKey(const std::string& a, const std::string& b) {
+	return a < b ? a + "\x1f" + b : b + "\x1f" + a;
+}
+
+// Called for every dying connection that held a lobby seat. When both
+// of a match's game connections die young without a battle_ended, no
+// battle ever started: the mutual GGPO handshake timeout. Remember the
+// pair; their future matches route through the relay.
+void SessionServer::NoteSeatDeath(HSteamNetConnection conn, const std::string& lobbyKey) {
+	if (lobbyKey.empty()) {
+		return;
+	}
+	auto fIter = _matchForensics.find(lobbyKey);
+	if (fIter == _matchForensics.end()) {
+		return;
+	}
+	MatchForensic& f = fIter->second;
+	if (conn != f.gameConns[0] && conn != f.gameConns[1]) {
+		return;
+	}
+	f.gameConnsDead++;
+	if (f.gameConnsDead < 2) {
+		return;
+	}
+
+	uint64_t lifespanMs = sf4e::Portable::NowMs() - f.secondHandoffAtMs;
+	if (!f.sawBattleEnded && lifespanMs < handshakeFailWindowMs) {
+		if (relayFallbackPairs.size() >= 256) {
+			auto oldest = relayFallbackPairs.begin();
+			for (auto iter = relayFallbackPairs.begin(); iter != relayFallbackPairs.end(); iter++) {
+				if (iter->second < oldest->second) {
+					oldest = iter;
+				}
+			}
+			relayFallbackPairs.erase(oldest);
+		}
+		relayFallbackPairs[PairKey(f.names[0], f.names[1])] = sf4e::Portable::NowMs();
+		spdlog::info(
+			"Server: direct connect between \"{}\" and \"{}\" never started a battle ({}ms); relaying their future matches",
+			f.names[0], f.names[1], lifespanMs
+		);
+	}
+	_matchForensics.erase(fIter);
+}
+
+bool SessionServer::NeedsRelayFallback(const Lobby& lobby) {
+	if (lobby.members.size() < 2) {
+		return false;
+	}
+	auto iter = relayFallbackPairs.find(PairKey(lobby.members[0].data.name, lobby.members[1].data.name));
+	if (iter == relayFallbackPairs.end()) {
+		return false;
+	}
+	if (sf4e::Portable::NowMs() - iter->second > relayFallbackTtlMs) {
+		relayFallbackPairs.erase(iter);
+		return false;
+	}
+	return true;
+}
+
 SessionServer::SessionServer(std::string identity, std::string sidecarHash) :
 	_identity(identity),
 	_sidecarHash(sidecarHash),
@@ -454,6 +514,19 @@ int SessionServer::Step()
 					lobby->id.key,
 					conn
 				);
+
+				// Second handoff = the match is game-vs-game now: open
+				// the forensic window that catches a both-games-die-young
+				// outcome (see NoteSeatDeath).
+				if (lobby->pendingHandoffs.empty() && lobby->members.size() >= 2) {
+					MatchForensic forensic;
+					forensic.gameConns[0] = lobby->members[0].conn;
+					forensic.gameConns[1] = lobby->members[1].conn;
+					forensic.names[0] = lobby->members[0].data.name;
+					forensic.names[1] = lobby->members[1].data.name;
+					forensic.secondHandoffAtMs = sf4e::Portable::NowMs();
+					_matchForensics[lobby->id.key] = forensic;
+				}
 				continue;
 			}
 
@@ -1005,6 +1078,12 @@ int SessionServer::Step()
 				continue;
 			}
 
+			// A battle ran; this match is no handshake failure.
+			auto fIter = _matchForensics.find(lobby->id.key);
+			if (fIter != _matchForensics.end()) {
+				fIter->second.sawBattleEnded = true;
+			}
+
 			// Reset the ready/loaded cycle so the seated players can
 			// ready up for a rematch. Character and stage picks stay as
 			// convenient defaults; results reporting is optional and
@@ -1087,6 +1166,11 @@ int SessionServer::Step()
 					if (pIter != peers.end() && (pIter->second.natFlags & SessionProtocol::NF_NEEDS_RELAY)) {
 						needsRelay = true;
 					}
+				}
+				// Pairs whose last direct attempt never started a battle
+				// get relayed even when both NATs probe clean.
+				if (!needsRelay && NeedsRelayFallback(lobby)) {
+					needsRelay = true;
 				}
 				if (needsRelay) {
 					std::string ip = _identity.substr(0, _identity.find(':'));
@@ -1298,6 +1382,9 @@ void SessionServer::RemoveFromLobby(HSteamNetConnection conn) {
 	}
 
 	if (lobby->members.empty() && !lobby->persistent) {
+		// The forensic verdict for a dying match lands in NoteSeatDeath
+		// before this; whatever is left here is stale.
+		_matchForensics.erase(key);
 		registry.Remove(key);
 		return;
 	}
@@ -1398,6 +1485,7 @@ void SessionServer::OnSteamNetConnectionStatusChanged(SteamNetConnectionStatusCh
 						pIter->second.challengeSentAtMs = 0;
 					}
 				}
+				NoteSeatDeath(pInfo->m_hConn, leaverIter->second.lobbyKey);
 			}
 
 			RemoveFromLobby(pInfo->m_hConn);

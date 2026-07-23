@@ -62,6 +62,24 @@ namespace sf4e {
 		std::map<std::string, RelayPair> _relayPairs;
 		void StepRelay();
 
+		// Forensics for each lobby's current handed-off match, opened
+		// when the second seat hands off to a game connection. If both
+		// game connections die inside handshakeFailWindowMs with no
+		// battle_ended between them- the mutual GGPO handshake timeout-
+		// the name pair is flagged for relay fallback.
+		struct MatchForensic {
+			HSteamNetConnection gameConns[2] = { 0, 0 };
+			std::string names[2];
+			uint64_t secondHandoffAtMs = 0;
+			int gameConnsDead = 0;
+			bool sawBattleEnded = false;
+		};
+		std::map<std::string, MatchForensic> _matchForensics;
+
+		static std::string PairKey(const std::string& a, const std::string& b);
+		void NoteSeatDeath(HSteamNetConnection conn, const std::string& lobbyKey);
+		bool NeedsRelayFallback(const Lobby& lobby);
+
 		// The registry key of the default lobby, if this server was
 		// constructed with one. Empty in dedicated mode. Tracked
 		// explicitly- a user-created lobby can coincidentally hold any
@@ -159,6 +177,17 @@ namespace sf4e {
 		// How long an unanswered challenge lives. Public so tests can
 		// shrink it.
 		uint64_t challengeTtlMs = 30 * 1000;
+
+		// Relay fallback memory: pairs of display names whose last
+		// direct match never started a battle (both games died young-
+		// the two-sided handshake timeout). Their next matches route
+		// through the relay even when both NATs probe as punchable,
+		// because some NATs map per destination IP and the probe can't
+		// see that. Value = flag time; entries expire after
+		// relayFallbackTtlMs. Public for tests.
+		std::map<std::string, uint64_t> relayFallbackPairs;
+		uint64_t handshakeFailWindowMs = 75 * 1000;
+		uint64_t relayFallbackTtlMs = 24ull * 60 * 60 * 1000;
 
 		// Public for visibility into tests only.
 		std::map<HSteamNetConnection, SessionProtocol::ConnectionID> cidMap;

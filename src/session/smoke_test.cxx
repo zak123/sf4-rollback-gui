@@ -876,6 +876,128 @@ int main(int argc, char** argv) {
 			}
 			g_clients.clear();
 		}
+
+		// Scenario 4: relay fallback. A pair whose games both die young
+		// without a battle- the mutual GGPO handshake timeout seen in
+		// the wild from NATs that map per destination IP, which the
+		// probe can't detect- gets its next match routed through the
+		// relay automatically, even in a brand-new lobby.
+		if (ret == 0) {
+			sf4e::SessionServer fallback(std::string("smokehost"), std::string(""));
+			if (fallback.Listen(23471) != 0) {
+				spdlog::error("FAIL: could not listen on 23471");
+				ret = 1;
+			}
+			else {
+				ret = [&fallback]() -> int {
+					TestClientCtx* gina = MakeClient("gina", 24201, SessionProtocol::LobbyID{ "", "" }, std::string(), std::string("smokehash"), 23471);
+					g_clients.push_back(gina);
+					TestClientCtx* hank = MakeClient("hank", 24202, SessionProtocol::LobbyID{ "", "" }, std::string(), std::string("smokehash"), 23471);
+					g_clients.push_back(hank);
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() { return fallback.peers.size() == 2; }),
+						"gina and hank register for the fallback scenario"
+					);
+
+					gina->c->Lobby_Create(std::string("fallback lobby"), true, 3, { 0, 99 });
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() { return gina->c->_lobbyData.members.size() == 1; }),
+						"gina creates the fallback lobby"
+					);
+					hank->listCount = -1;
+					hank->c->Lobby_RequestList();
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() { return hank->listCount == 1; }),
+						"hank sees the fallback lobby"
+					);
+					hank->c->Lobby_Join(hank->lastListing[0].id);
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() { return hank->c->_lobbyData.members.size() == 2; }),
+						"hank joins the fallback lobby"
+					);
+
+					Dimps::GameEvents::Wire::ConfirmedCharaConditions chara;
+					memset(&chara, 0, sizeof(chara));
+					chara.charaID = 3;
+					gina->c->PreBattle_SetChara(chara);
+					gina->c->PreBattle_SetEnv(42);
+					gina->c->PreBattle_SetStage(2);
+					gina->c->Lobby_Ready();
+					chara.charaID = 4;
+					hank->c->PreBattle_SetChara(chara);
+					hank->c->Lobby_Ready();
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() {
+							return !gina->handoff.token.empty() && !hank->handoff.token.empty();
+						}),
+						"the fallback pair readies and receives handoff tokens"
+					);
+					CHECK(
+						gina->c->_matchData.relayEndpoint.empty(),
+						"a clean-probing pair's first match is direct"
+					);
+
+					TestClientCtx* gameGina = MakeClient("gina", 24203, gina->handoff.lobby, gina->handoff.token, std::string("smokehash"), 23471);
+					g_clients.push_back(gameGina);
+					TestClientCtx* gameHank = MakeClient("hank", 24204, hank->handoff.lobby, hank->handoff.token, std::string("smokehash"), 23471);
+					g_clients.push_back(gameHank);
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() {
+							return gameGina->readyFired && gameHank->readyFired;
+						}),
+						"the fallback game connections take the seats"
+					);
+
+					// Both games die young with no battle_ended between
+					// them: the two-sided handshake watchdog.
+					gameGina->c->Disconnect();
+					gameHank->c->Disconnect();
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() { return fallback.relayFallbackPairs.size() == 1; }),
+						"both games dying young without a battle flags the pair"
+					);
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() { return fallback.registry.lobbies.empty(); }),
+						"the dead match's lobby empties away"
+					);
+
+					// The pair regroups in a brand-new lobby, as real
+					// players do; the fallback keys on names, not lobbies.
+					gina->c->Lobby_Create(std::string("fallback rematch"), true, 3, { 0, 99 });
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() { return gina->c->_lobbyData.members.size() == 1; }),
+						"gina recreates a lobby for the rematch"
+					);
+					hank->listCount = -1;
+					hank->c->Lobby_RequestList();
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() { return hank->listCount == 1; }),
+						"hank sees the rematch lobby"
+					);
+					hank->c->Lobby_Join(hank->lastListing[0].id);
+					CHECK(
+						PumpUntil(fallback, 5000, [&]() {
+							return hank->c->_lobbyData.members.size() == 2 &&
+								!gina->c->_matchData.relayEndpoint.empty() &&
+								!hank->c->_matchData.relayEndpoint.empty();
+						}),
+						"the flagged pair's next match carries the relay endpoint"
+					);
+
+					return 0;
+				}();
+
+				for (auto iter = g_clients.begin(); iter != g_clients.end(); iter++) {
+					(*iter)->c->Disconnect();
+				}
+				fallback.Step();
+				fallback.Close();
+				for (auto iter = g_clients.begin(); iter != g_clients.end(); iter++) {
+					delete *iter;
+				}
+				g_clients.clear();
+			}
+		}
 	}
 
 	GameNetworkingSockets_Kill();
