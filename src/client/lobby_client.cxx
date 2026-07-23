@@ -1066,10 +1066,11 @@ static void DrawSortedCombo(const char* label, int* id, int* displayOrder, const
 	*id = displayOrder[row];
 }
 
-// Named pick widgets, backed by the Roster tables. These write the
-// raw bytes the game consumes (docs/roster-names-research.md §4):
-// everything 0-based; ultra 0/1/2 = U1/U2/W. Out-of-range persisted
-// values are healed here before READY can send them.
+// Character setup. Ultra is a named picker (three safe options);
+// costume and color are bounded numeric inputs- the original author's
+// raw style, but capped to the base game. All 0-based; ultra 0/1/2 =
+// U1/U2/W. Persisted picks outside the range are healed here before
+// READY can send them.
 static void DrawPickCombos() {
 	rVsMode::ConfirmedCharaConditions& cond = g_app.myConditions;
 	int charaID = g_app.myCharaID;
@@ -1084,48 +1085,31 @@ static void DrawPickCombos() {
 		cond.ultraCombo = (BYTE)sel;
 	}
 
-	int costumeCount = Roster::costumeCounts[charaID];
-	{
-		// Slot order: Default, Alt 1..N, then the 2014 trio- always
-		// Vacation, Wild, Horror, and always the last three slots.
-		char alt[3][8];
-		const char* items[7];
-		int n = 0;
-		items[n++] = "Default";
-		for (int a = 1; a <= costumeCount - 4; a++) {
-			snprintf(alt[a - 1], sizeof(alt[0]), "Alt %d", a);
-			items[n++] = alt[a - 1];
-		}
-		items[n++] = "Vacation";
-		items[n++] = "Wild";
-		items[n++] = "Horror";
-		int sel = cond.costume < costumeCount ? cond.costume : 0;
-		ImGui::Combo("Costume", &sel, items, costumeCount);
-		cond.costume = (BYTE)sel;
-	}
+	static const int stepSize = 1;
 
-	{
-		// Every costume has colors 1-10 plus two stylized takes on
-		// color 1; the 2014 trio adds 13-22.
-		static char labels[22][16];
-		static const char* items[22];
-		if (!items[0]) {
-			for (int i = 0; i < 22; i++) {
-				if (i == 10 || i == 11) {
-					snprintf(labels[i], sizeof(labels[0]), "%d (stylized)", i + 1);
-				}
-				else {
-					snprintf(labels[i], sizeof(labels[0]), "%d", i + 1);
-				}
-				items[i] = labels[i];
-			}
-		}
-		bool has2014Colors = cond.costume >= costumeCount - 3;
-		int colorCount = has2014Colors ? 22 : 12;
-		int sel = cond.color < colorCount ? cond.color : 0;
-		ImGui::Combo("Color", &sel, items, colorCount);
-		cond.color = (BYTE)sel;
+	// The 2014 DLC costumes are always a character's last three slots
+	// (Vacation / Wild / Horror). Loaded through the netplay path- which
+	// bypasses the store's entitlement check- they crash on battle load,
+	// so the costume cap excludes them, leaving the base game's Default
+	// and alternates. Colors likewise stay in the base 1-10 range,
+	// dropping the DLC-only (13-22) and stylized (11-12) ones.
+	int maxCostume = Roster::costumeCounts[charaID] - 4;
+	if (maxCostume < 0) {
+		maxCostume = 0;
 	}
+	ImGui::InputScalar("Costume", ImGuiDataType_U8, &cond.costume, &stepSize);
+	if (cond.costume > maxCostume) {
+		cond.costume = (BYTE)maxCostume;
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("0-%d", maxCostume);
+
+	ImGui::InputScalar("Color", ImGuiDataType_U8, &cond.color, &stepSize);
+	if (cond.color > 9) {
+		cond.color = 9;
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("0-9");
 }
 
 static void DrawLobbyPanel() {

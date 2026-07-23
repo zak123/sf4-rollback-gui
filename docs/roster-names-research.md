@@ -12,6 +12,20 @@ treat name→byte mappings as provisional; the sidecar also carries a
 native chara-select byte logger (`LogVsCharaSelectChanges`) as an
 alternate verification path.
 
+**UPDATE (2026-07-22): DLC costumes crash on battle load through the
+netplay path.** First playtest with a non-default costume (Sakura,
+costume 4 = the Vacation DLC costume) hard-crashed both machines during
+load, after GGPO had synced. The netplay path bypasses the store's
+entitlement check that the native character select performs, and a DLC
+costume brought up that way faults the loader (the game's own SEH
+swallows it- no WER, no dump, no log). The pick UI was therefore pulled
+back to bounded numeric inputs capped to the base game: costume
+`0..costumeCount-4` (excludes the always-last-three DLC slots
+Vacation/Wild/Horror) and color `0..9` (drops DLC-only 13-22 and
+stylized 11-12). Base-game alternates (Alt 1..3) are allowed but remain
+unconfirmed through netplay- if they also crash, restrict further to
+Default only.
+
 ## 1. How the bytes reach the game
 
 The app fills `Dimps::GameEvents::VsMode::ConfirmedCharaConditions`
