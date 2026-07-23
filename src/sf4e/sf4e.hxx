@@ -26,6 +26,13 @@ namespace sf4e {
 		uint16_t nGgpoPort = 23457;
 		uint8_t nDelay = 1;
 
+		// Route this match through the server's UDP relay regardless of
+		// the NAT probe's verdict. The escape hatch for NATs that map
+		// per destination IP: they look punchable to the probe (both
+		// echo ports share the server's address) but mint a fresh
+		// mapping toward the peer, so direct connects time out.
+		bool bForceRelay = false;
+
 		// Synctest, set by --synctest: run a local battle under GGPO's
 		// sync-test backend instead of a network session- every frame
 		// is rolled back and re-simulated, and state checksums are

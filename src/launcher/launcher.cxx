@@ -331,6 +331,7 @@ int WINAPI wWinMain(
 	app.add_option("--join-name", joinName, "Display name matching the seat being taken over");
 	app.add_option("--ggpo-port", nGgpoPort, "Local UDP port for GGPO traffic")->check(CLI::Range(1024, 65535));
 	app.add_option("--delay", nDelay, "GGPO input delay in frames")->check(CLI::Range(0, 10));
+	app.add_flag("--force-relay", args.bForceRelay, "Route match traffic through the server's UDP relay even if the NAT probe looks clean");
 	app.add_flag("--synctest", args.bSynctest, "Determinism soak: run a local battle under GGPO's sync-test backend, which rolls back and re-simulates every frame and compares state checksums");
 	int nSynctestFrames = 1;
 	int nSynctestInputEvery = 4;

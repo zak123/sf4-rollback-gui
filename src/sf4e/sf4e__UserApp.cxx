@@ -479,6 +479,15 @@ void fUserApp::StartSession(
         spdlog::info("NAT probe: no reply; reporting local GGPO port {} and requesting relay", port);
     }
 
+    // The lobby app's "route through relay" setting overrides the probe
+    // verdict: some NATs map per destination IP, which the probe can't
+    // see (both echoes share the server's address), and their matches
+    // time out on a punch that looks like it should work.
+    if (sf4e::args.bForceRelay) {
+        netplay->client._natFlags |= SessionProtocol::NF_NEEDS_RELAY;
+        spdlog::info("Relay forced by the lobby app's setting");
+    }
+
     netplay->client._autoJoinLobby = { lobbyHost, lobbyKey };
     netplay->client._autoJoinHandoff = handoffToken;
     netplay->client.Connect(addr);

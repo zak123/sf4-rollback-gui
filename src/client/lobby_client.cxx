@@ -123,6 +123,12 @@ struct App {
 	// taskbar flash stays on- that's the quiet channel.
 	bool bMuted = false;
 
+	// Launch the game with --force-relay so its matches route through
+	// the server's UDP relay even when the NAT probe looks clean. The
+	// rescue for probe-invisible NATs (per-destination-IP mappings);
+	// either side setting it relays the match for both.
+	bool bForceRelay = false;
+
 	std::mt19937 rand;
 
 	App() {
@@ -179,6 +185,7 @@ static void LoadConfig() {
 		g_app.myConditions.ultraCombo = (BYTE)j.value("ultra", 0);
 		g_app.stageID = j.value("stageID", 0);
 		g_app.bMuted = j.value("muted", false);
+		g_app.bForceRelay = j.value("forceRelay", false);
 	}
 	catch (...) {
 		// A mangled config just means defaults.
@@ -206,6 +213,7 @@ static void SaveConfig() {
 		j["ultra"] = (int)g_app.myConditions.ultraCombo;
 		j["stageID"] = g_app.stageID;
 		j["muted"] = g_app.bMuted;
+		j["forceRelay"] = g_app.bForceRelay;
 		std::ofstream f(path);
 		f << j.dump(2);
 	}
@@ -323,14 +331,15 @@ static void OnMatchHandoff(const SessionProtocol::MatchHandoff& handoff, Session
 	snprintf(
 		cmdA,
 		sizeof(cmdA),
-		"\"%ws\" --join-server \"%s\" --join-lobby-host \"%s\" --join-lobby-key \"%s\" --join-token \"%s\" --join-name \"%s\" --ggpo-port %u",
+		"\"%ws\" --join-server \"%s\" --join-lobby-host \"%s\" --join-lobby-key \"%s\" --join-token \"%s\" --join-name \"%s\" --ggpo-port %u%s",
 		szLauncher,
 		g_app.szServerAddr,
 		handoff.lobby.host.c_str(),
 		handoff.lobby.key.c_str(),
 		handoff.token.c_str(),
 		c->_name.c_str(),
-		(unsigned)g_app.ggpoPort
+		(unsigned)g_app.ggpoPort,
+		g_app.bForceRelay ? " --force-relay" : ""
 	);
 	wchar_t cmdW[1024];
 	MultiByteToWideChar(CP_UTF8, 0, cmdA, -1, cmdW, 1024);
@@ -1192,6 +1201,17 @@ static void DrawLobbyPanel() {
 			DrawPickCombos();
 			if (mySide == 0) {
 				DrawSortedCombo("Stage", &g_app.stageID, g_stageDisplayOrder, StageRowName, Roster::NUM_STAGES);
+			}
+			if (ImGui::Checkbox("Route through relay", &g_app.bForceRelay)) {
+				SaveConfig();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Send this match's traffic through the server instead of\n"
+					"connecting directly. Turn it on if matches keep timing out\n"
+					"with \"could not reach the opponent\"- either player setting\n"
+					"it is enough for both. Adds the server's ping to the match."
+				);
 			}
 			ImGui::Spacing();
 			if (AccentButton("READY", ImVec2(-FLT_MIN, 34))) {
