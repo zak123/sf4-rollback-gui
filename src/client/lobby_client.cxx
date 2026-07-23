@@ -898,7 +898,7 @@ static void DrawLoginScreen() {
 
 	ImGui::BeginChild("login_card", ImVec2(cardW, cardH), true);
 	ImGui::SetWindowFontScale(1.7f);
-	ImGui::TextUnformatted("sf4e");
+	ImGui::TextUnformatted("SF4 Rollback GUI");
 	ImGui::SetWindowFontScale(1.0f);
 	ImGui::SameLine();
 	ImGui::TextDisabled("v" SF4E_VERSION);
@@ -1142,6 +1142,19 @@ static void DrawLobbyPanel() {
 		c._lobbyData.roundCount,
 		(int)c._lobbyData.roundTime.integral
 	);
+
+	// The server sets a relay endpoint when this match will be routed
+	// through it- because a seat forced it, a NAT probed untraversable,
+	// or an earlier direct match between these two never connected. The
+	// app can't tell which, so the note stays neutral; the point is the
+	// player knows the connection path changed and that a retry has a
+	// real chance now.
+	if (!c._matchData.relayEndpoint.empty()) {
+		ImGui::TextColored(
+			ImVec4(0.45f, 0.72f, 0.95f, 1.0f),
+			"Relayed through the server (adds its ping to the match)."
+		);
+	}
 	ImGui::Spacing();
 
 	// The room always answers "who is playing right now?"

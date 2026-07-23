@@ -498,9 +498,10 @@ void fSystem::BattleUpdate() {
                       "fixes it.\n\n"
                       "The game will now close- your lobby app will put "
                       "you back in the lobby."
-                    : "Could not reach the opponent to start the match. "
-                      "One side's network may be blocking game traffic "
-                      "(NAT/firewall).\n\n"
+                    : "Couldn't reach the opponent for a direct connection.\n\n"
+                      "Head back and ready up again- when a direct match "
+                      "between two players fails, the server automatically "
+                      "routes their next one through the relay.\n\n"
                       "The game will now close- your lobby app will put "
                       "you back in the lobby."
                 );
