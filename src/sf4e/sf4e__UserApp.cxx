@@ -94,20 +94,40 @@ void fUserApp::_OnVsBattleTasksRegistered()
         // forwards, so each side only ever talks to the always-
         // reachable server- works behind any NAT.
         const std::string& relayEndpoint = netplay->client._matchData.relayEndpoint;
+
+        // The server builds this endpoint from its own identity, which may
+        // be a hostname (ex. sf4.zak123.com:23453). Both the relay
+        // registration and GGPO need a literal IP:port, so resolve it once
+        // here- ParseString alone doesn't do DNS. An endpoint that won't
+        // resolve falls through to a direct connect rather than firing
+        // packets at a name nothing can route.
+        std::string relayNumeric;
+        if (!relayEndpoint.empty()) {
+            SteamNetworkingIPAddr relayAddr;
+            if (sf4e::Net::ResolveHostPort(relayEndpoint.c_str(), relayAddr)) {
+                char szRelay[SteamNetworkingIPAddr::k_cchMaxString];
+                relayAddr.ToString(szRelay, sizeof(szRelay), true);
+                relayNumeric = szRelay;
+            }
+            else {
+                spdlog::warn("Relay: could not resolve endpoint {}; trying a direct connect", relayEndpoint);
+            }
+        }
+
         int selfSeat = -1;
         for (int i = 0; i < 2 && i < (int)netplay->client._lobbyData.members.size(); i++) {
             if (netplay->client._lobbyData.members[i].name == netplay->client._name) {
                 selfSeat = i;
             }
         }
-        if (!relayEndpoint.empty() && selfSeat >= 0) {
+        if (!relayNumeric.empty() && selfSeat >= 0) {
             std::string token =
                 netplay->client._lobbyData.id.host + ":" + netplay->client._lobbyData.id.key;
-            if (sf4e::Net::Net_RelayRegister(relayEndpoint.c_str(), netplay->client._ggpoPort, token.c_str(), selfSeat)) {
-                spdlog::info("Relay: registered seat {} with {} for match {}", selfSeat, relayEndpoint, token);
+            if (sf4e::Net::Net_RelayRegister(relayNumeric.c_str(), netplay->client._ggpoPort, token.c_str(), selfSeat)) {
+                spdlog::info("Relay: registered seat {} with {} for match {}", selfSeat, relayNumeric, token);
             }
             else {
-                spdlog::warn("Relay: could not register with {}", relayEndpoint);
+                spdlog::warn("Relay: could not register with {}", relayNumeric);
             }
         }
 
@@ -131,9 +151,9 @@ void fUserApp::_OnVsBattleTasksRegistered()
             else {
                 SessionProtocol::MemberData& memberData = netplay->client._lobbyData.members[i];
                 player.type = GGPO_PLAYERTYPE_REMOTE;
-                if (!relayEndpoint.empty()) {
+                if (!relayNumeric.empty()) {
                     // Aim at the relay; it forwards to the real peer.
-                    std::string ep = relayEndpoint;
+                    std::string ep = relayNumeric;
                     size_t colon = ep.find_last_of(':');
                     std::string ip = ep.substr(0, colon);
                     strcpy_s(player.u.remote.ip_address, 32, ip.c_str());
